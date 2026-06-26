@@ -43,8 +43,89 @@ def get_accept_header(accept_header_param):
     config.read(os.path.expanduser('~/.setlistfmcli'))
     if 'setlistfm' in config and 'accept_header' in config['setlistfm']:
         return config['setlistfm']['accept_header']
-    
+
     return 'application/json' # Default value
+
+# --- Spotify Configuration & Auth ---
+def get_spotify_setting(param_value, env_var, config_key, default=None):
+    """Resolve a Spotify setting from param, env var, or config file.
+
+    Order of precedence:
+    1. CLI parameter
+    2. Environment variable
+    3. [spotify] section of the ~/.setlistfmcli config file
+    4. Provided default
+    """
+    if param_value:
+        return param_value
+
+    env_value = os.environ.get(env_var)
+    if env_value:
+        return env_value
+
+    config = configparser.ConfigParser()
+    config.read(os.path.expanduser('~/.setlistfmcli'))
+    if 'spotify' in config and config_key in config['spotify']:
+        return config['spotify'][config_key]
+
+    return default
+
+def get_spotify_client(client_id, client_secret, redirect_uri, public, open_browser=True):
+    """Create an authenticated Spotipy client using the Authorization Code flow.
+
+    Creating playlists requires user authorization, so this uses SpotifyOAuth,
+    which caches the token to ./.cache and refreshes it automatically. The
+    import is performed lazily so the rest of the CLI works without spotipy
+    installed.
+    """
+    # Imported lazily so commands that don't touch Spotify (and the test
+    # suite) don't require spotipy to be importable.
+    import spotipy
+    from spotipy.oauth2 import SpotifyOAuth
+
+    resolved_id = get_spotify_setting(client_id, 'SPOTIFY_CLIENT_ID', 'client_id')
+    resolved_secret = get_spotify_setting(client_secret, 'SPOTIFY_CLIENT_SECRET', 'client_secret')
+    resolved_redirect = get_spotify_setting(
+        redirect_uri, 'SPOTIFY_REDIRECT_URI', 'redirect_uri',
+        default='http://localhost:8888/callback'
+    )
+
+    if not resolved_id or not resolved_secret:
+        return None
+
+    # playlist-modify-public is needed for public playlists, the private scope
+    # for private ones. Requesting both keeps the cached token valid for either.
+    scope = 'playlist-modify-public playlist-modify-private'
+
+    auth_manager = SpotifyOAuth(
+        client_id=resolved_id,
+        client_secret=resolved_secret,
+        redirect_uri=resolved_redirect,
+        scope=scope,
+        open_browser=open_browser,
+    )
+    return spotipy.Spotify(auth_manager=auth_manager)
+
+# --- Setlist song extraction ---
+def extract_songs(setlist):
+    """Return the list of songs played in a setlist.
+
+    Each item is a dict with 'name' (the song title) and 'artist' (the artist
+    to search Spotify for -- the original artist for covers, otherwise the
+    performing artist). Empty song names (e.g. segues/spacers) are skipped.
+    """
+    performing_artist = setlist.get('artist', {}).get('name', '')
+    songs = []
+    sets = setlist.get('sets', {}).get('set', [])
+    for set_section in sets:
+        for song in set_section.get('song', []):
+            name = (song.get('name') or '').strip()
+            if not name:
+                continue
+            cover = song.get('cover') or {}
+            search_artist = cover.get('name') or performing_artist
+            songs.append({'name': name, 'artist': search_artist})
+    return songs
 
 # --- API Request Logic ---
 def make_api_request(api_key, accept_header, endpoint, params=None):
@@ -197,6 +278,55 @@ def artist(ctx, mbid):
     if result:
         click.echo(json.dumps(result, indent=2))
 
+def fetch_attended_setlists(api_key, accept_header, user_id, rate_limit, max_requests):
+    """Fetch all of a user's attended setlists, paging through the API.
+
+    Returns a tuple of (setlists, limit_hit) where limit_hit indicates the
+    fetch stopped early because max_requests was reached.
+    """
+    all_setlists = []
+    page = 1
+    limit_hit = False
+
+    sleep_duration = 1.0 / rate_limit if rate_limit > 0 else 0
+
+    click.echo(f"Fetching attended concerts for {user_id}...", err=True)
+    click.echo(f"Rate limit: {rate_limit}/sec, Max requests: {max_requests}", err=True)
+
+    while page <= max_requests:
+        endpoint = f'user/{user_id}/attended'
+        params = {'p': page}
+
+        click.echo(f" - Fetching page {page}...", err=True)
+        data = make_api_request(api_key, accept_header, endpoint, params)
+
+        if not data:
+            click.echo("Stopping due to API error.", err=True)
+            break
+
+        if 'setlist' not in data or not data['setlist']:
+            break
+
+        all_setlists.extend(data['setlist'])
+
+        total = data.get('total', 0)
+        items_per_page = data.get('itemsPerPage', 20)
+
+        if (page * items_per_page) >= total:
+            break
+
+        page += 1
+
+        if page > max_requests:
+            limit_hit = True
+            click.echo(f"Stopping: Reached max requests limit of {max_requests}.", err=True)
+            break
+
+        time.sleep(sleep_duration)
+
+    click.echo(f"Finished fetching. Found {len(all_setlists)} concerts.", err=True)
+    return all_setlists, limit_hit
+
 @cli.command(name='user-attended')
 @click.argument('user_id')
 @click.option('--rate-limit', type=float, default=1.0, help='Requests per second limit.', show_default=True)
@@ -204,49 +334,181 @@ def artist(ctx, mbid):
 @click.pass_context
 def user_attended(ctx, user_id, rate_limit, max_requests):
     """Get a user's attended concerts and generate an HTML report."""
-    all_setlists = []
-    page = 1
-    limit_hit = False
-    
-    sleep_duration = 1.0 / rate_limit if rate_limit > 0 else 0
-    
-    click.echo(f"Fetching attended concerts for {user_id}...", err=True)
-    click.echo(f"Rate limit: {rate_limit}/sec, Max requests: {max_requests}", err=True)
-
-    while page <= max_requests:
-        endpoint = f'user/{user_id}/attended'
-        params = {'p': page}
-        
-        click.echo(f" - Fetching page {page}...", err=True)
-        data = make_api_request(ctx.obj['API_KEY'], ctx.obj['ACCEPT_HEADER'], endpoint, params)
-        
-        if not data:
-            click.echo("Stopping due to API error.", err=True)
-            break
-            
-        if 'setlist' not in data or not data['setlist']:
-            break
-            
-        all_setlists.extend(data['setlist'])
-        
-        total = data.get('total', 0)
-        items_per_page = data.get('itemsPerPage', 20)
-        
-        if (page * items_per_page) >= total:
-            break
-        
-        page += 1
-        
-        if page > max_requests:
-            limit_hit = True
-            click.echo(f"Stopping: Reached max requests limit of {max_requests}.", err=True)
-            break
-        
-        time.sleep(sleep_duration)
-
-    click.echo(f"Finished fetching. Found {len(all_setlists)} concerts.", err=True)
+    all_setlists, limit_hit = fetch_attended_setlists(
+        ctx.obj['API_KEY'], ctx.obj['ACCEPT_HEADER'], user_id, rate_limit, max_requests
+    )
     html_output = generate_html_report(all_setlists, user_id, limit_hit, max_requests)
     click.echo(html_output)
+
+def find_spotify_track_uri(sp, name, artist):
+    """Search Spotify for a track, returning its URI or None.
+
+    Tries a field-qualified query first, then progressively looser queries so
+    songs that don't match the strict form still have a chance of resolving.
+    """
+    queries = []
+    if artist:
+        queries.append(f'track:{name} artist:{artist}')
+        queries.append(f'{name} {artist}')
+    queries.append(name)
+
+    for query in queries:
+        try:
+            results = sp.search(q=query, type='track', limit=1)
+        except Exception as e:  # noqa: BLE001 - surface API/network errors, keep going
+            click.echo(f"   ! Spotify search error for '{name}': {e}", err=True)
+            return None
+        items = results.get('tracks', {}).get('items', [])
+        if items:
+            return items[0].get('uri')
+    return None
+
+def build_playlist_title(setlist):
+    """Build a human-readable playlist title from a setlist."""
+    artist = setlist.get('artist', {}).get('name', 'Unknown Artist')
+    venue = setlist.get('venue', {}).get('name', '')
+    city = setlist.get('venue', {}).get('city', {}).get('name', '')
+    event_date = setlist.get('eventDate', '')
+
+    location = ', '.join(part for part in (venue, city) if part)
+    title = artist
+    if location:
+        title += f' @ {location}'
+    if event_date:
+        title += f' ({event_date})'
+    return title
+
+@cli.command(name='create-playlists')
+@click.argument('user_id')
+@click.option('--spotify-client-id', help='Spotify app client ID.')
+@click.option('--spotify-client-secret', help='Spotify app client secret.')
+@click.option('--spotify-redirect-uri', help='Spotify OAuth redirect URI. [default: http://localhost:8888/callback]')
+@click.option('--public/--private', 'public', default=False, help='Create public playlists instead of private ones.', show_default=True)
+@click.option('--combined', is_flag=True, help='Create a single combined playlist instead of one per concert.')
+@click.option('--playlist-name', help='Name for the combined playlist (with --combined).')
+@click.option('--no-browser', is_flag=True, help='Do not open a browser for Spotify auth; print the URL instead.')
+@click.option('--dry-run', is_flag=True, help='Resolve tracks and show what would be created without writing to Spotify.')
+@click.option('--rate-limit', type=float, default=1.0, help='setlist.fm requests per second limit.', show_default=True)
+@click.option('--max-requests', type=int, default=1440, help='Maximum setlist.fm requests per run.', show_default=True)
+@click.pass_context
+def create_playlists(ctx, user_id, spotify_client_id, spotify_client_secret, spotify_redirect_uri,
+                     public, combined, playlist_name, no_browser, dry_run, rate_limit, max_requests):
+    """Create Spotify playlists from a user's attended setlists.
+
+    Fetches every concert USER_ID has marked as attended on setlist.fm and, for
+    each setlist that has songs, builds a Spotify playlist of those songs. Use
+    --combined to collect everything into one playlist instead.
+    """
+    # Fetch the attended setlists first so we fail fast on setlist.fm errors
+    # before prompting for Spotify auth.
+    all_setlists, limit_hit = fetch_attended_setlists(
+        ctx.obj['API_KEY'], ctx.obj['ACCEPT_HEADER'], user_id, rate_limit, max_requests
+    )
+
+    setlists_with_songs = [s for s in all_setlists if extract_songs(s)]
+    if not setlists_with_songs:
+        click.echo("No setlists with songs found; nothing to create.", err=True)
+        return
+
+    click.echo(f"{len(setlists_with_songs)} of {len(all_setlists)} concerts have song data.", err=True)
+
+    sp = None
+    spotify_user_id = None
+    if not dry_run:
+        sp = get_spotify_client(
+            spotify_client_id, spotify_client_secret, spotify_redirect_uri,
+            public, open_browser=not no_browser
+        )
+        if sp is None:
+            click.echo(
+                "Error: Spotify credentials not found. Provide --spotify-client-id and "
+                "--spotify-client-secret, set SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET, "
+                "or add a [spotify] section to ~/.setlistfmcli",
+                err=True,
+            )
+            sys.exit(1)
+        spotify_user_id = sp.current_user()['id']
+
+    def resolve_uris(setlist):
+        """Resolve a setlist's songs to a de-duplicated list of track URIs."""
+        uris = []
+        seen = set()
+        missing = 0
+        for song in extract_songs(setlist):
+            if dry_run:
+                # Without auth we can't search; just report intended tracks.
+                click.echo(f"     - {song['artist']} - {song['name']}", err=True)
+                continue
+            uri = find_spotify_track_uri(sp, song['name'], song['artist'])
+            if uri and uri not in seen:
+                seen.add(uri)
+                uris.append(uri)
+            elif not uri:
+                missing += 1
+                click.echo(f"     ! Not found on Spotify: {song['artist']} - {song['name']}", err=True)
+        return uris, missing
+
+    def add_tracks(playlist_id, uris):
+        """Add URIs to a playlist, chunked to Spotify's 100-item limit."""
+        for i in range(0, len(uris), 100):
+            sp.playlist_add_items(playlist_id, uris[i:i + 100])
+
+    if combined:
+        name = playlist_name or f"Concerts attended by {user_id}"
+        all_uris = []
+        seen = set()
+        for setlist in setlists_with_songs:
+            click.echo(f" - {build_playlist_title(setlist)}", err=True)
+            uris, _ = resolve_uris(setlist)
+            for uri in uris:
+                if uri not in seen:
+                    seen.add(uri)
+                    all_uris.append(uri)
+
+        if dry_run:
+            click.echo(f"[dry-run] Would create playlist '{name}' (resolution skipped without auth).", err=True)
+            return
+
+        click.echo(f"Creating combined playlist '{name}' with {len(all_uris)} tracks...", err=True)
+        playlist = sp.user_playlist_create(
+            spotify_user_id, name, public=public,
+            description=f"All concerts attended by {user_id}, via setlist.fm."
+        )
+        add_tracks(playlist['id'], all_uris)
+        click.echo(playlist['external_urls']['spotify'])
+        return
+
+    created = 0
+    for setlist in setlists_with_songs:
+        title = build_playlist_title(setlist)
+        click.echo(f" - {title}", err=True)
+        uris, missing = resolve_uris(setlist)
+
+        if dry_run:
+            continue
+
+        if not uris:
+            click.echo("   (no songs resolved on Spotify; skipping)", err=True)
+            continue
+
+        playlist = sp.user_playlist_create(
+            spotify_user_id, title, public=public,
+            description=setlist.get('url', 'Created from a setlist.fm attended setlist.')
+        )
+        add_tracks(playlist['id'], uris)
+        created += 1
+        note = f" ({missing} not found)" if missing else ""
+        click.echo(f"   Added {len(uris)} tracks{note}: {playlist['external_urls']['spotify']}")
+
+    if dry_run:
+        click.echo("[dry-run] No playlists were created.", err=True)
+    else:
+        click.echo(f"Done. Created {created} playlist(s).", err=True)
+        if limit_hit:
+            click.echo(
+                f"Note: results may be incomplete; stopped at max-requests ({max_requests}).",
+                err=True,
+            )
 
 if __name__ == '__main__':
     cli(obj={})
