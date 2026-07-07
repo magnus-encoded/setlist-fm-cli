@@ -4,6 +4,10 @@ A small CLI for the [setlist.fm](https://www.setlist.fm/) API. It can search
 artists, fetch a user's attended concerts as an HTML report, and turn those
 attended setlists into **Spotify playlists**.
 
+There is also an Android client in [`android/`](android/README.md) that wraps
+the same logic: log in to both services on the phone, browse your attended
+concerts, and review each setlist before adding it to your Spotify library.
+
 ## Install
 
 ```bash
