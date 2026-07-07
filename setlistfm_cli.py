@@ -70,7 +70,7 @@ def get_spotify_setting(param_value, env_var, config_key, default=None):
 
     return default
 
-def get_spotify_client(client_id, client_secret, redirect_uri, public, open_browser=True):
+def get_spotify_client(client_id, client_secret, redirect_uri, open_browser=True):
     """Create an authenticated Spotipy client using the Authorization Code flow.
 
     Creating playlists requires user authorization, so this uses SpotifyOAuth,
@@ -405,7 +405,7 @@ def create_playlists(ctx, user_id, spotify_client_id, spotify_client_secret, spo
         ctx.obj['API_KEY'], ctx.obj['ACCEPT_HEADER'], user_id, rate_limit, max_requests
     )
 
-    setlists_with_songs = [s for s in all_setlists if extract_songs(s)]
+    setlists_with_songs = [(s, songs) for s in all_setlists if (songs := extract_songs(s))]
     if not setlists_with_songs:
         click.echo("No setlists with songs found; nothing to create.", err=True)
         return
@@ -417,7 +417,7 @@ def create_playlists(ctx, user_id, spotify_client_id, spotify_client_secret, spo
     if not dry_run:
         sp = get_spotify_client(
             spotify_client_id, spotify_client_secret, spotify_redirect_uri,
-            public, open_browser=not no_browser
+            open_browser=not no_browser
         )
         if sp is None:
             click.echo(
@@ -429,12 +429,12 @@ def create_playlists(ctx, user_id, spotify_client_id, spotify_client_secret, spo
             sys.exit(1)
         spotify_user_id = sp.current_user()['id']
 
-    def resolve_uris(setlist):
+    def resolve_uris(songs):
         """Resolve a setlist's songs to a de-duplicated list of track URIs."""
         uris = []
         seen = set()
         missing = 0
-        for song in extract_songs(setlist):
+        for song in songs:
             if dry_run:
                 # Without auth we can't search; just report intended tracks.
                 click.echo(f"     - {song['artist']} - {song['name']}", err=True)
@@ -457,9 +457,9 @@ def create_playlists(ctx, user_id, spotify_client_id, spotify_client_secret, spo
         name = playlist_name or f"Concerts attended by {user_id}"
         all_uris = []
         seen = set()
-        for setlist in setlists_with_songs:
+        for setlist, songs in setlists_with_songs:
             click.echo(f" - {build_playlist_title(setlist)}", err=True)
-            uris, _ = resolve_uris(setlist)
+            uris, _ = resolve_uris(songs)
             for uri in uris:
                 if uri not in seen:
                     seen.add(uri)
@@ -476,13 +476,18 @@ def create_playlists(ctx, user_id, spotify_client_id, spotify_client_secret, spo
         )
         add_tracks(playlist['id'], all_uris)
         click.echo(playlist['external_urls']['spotify'])
+        if limit_hit:
+            click.echo(
+                f"Note: playlist may be incomplete; stopped at max-requests ({max_requests}).",
+                err=True,
+            )
         return
 
     created = 0
-    for setlist in setlists_with_songs:
+    for setlist, songs in setlists_with_songs:
         title = build_playlist_title(setlist)
         click.echo(f" - {title}", err=True)
-        uris, missing = resolve_uris(setlist)
+        uris, missing = resolve_uris(songs)
 
         if dry_run:
             continue

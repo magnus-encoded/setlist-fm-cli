@@ -203,7 +203,6 @@ class SetlistFMCliTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0, msg=result.output + (result.stderr or ''))
         sp.user_playlist_create.assert_called_once()
-        _, kwargs = sp.user_playlist_create.call_args
         args = sp.user_playlist_create.call_args[0]
         self.assertEqual(args[0], "spotify_user")
         self.assertEqual(args[1], "Test Band @ The Venue, Testville (21-09-2025)")
