@@ -1,10 +1,12 @@
 package io.github.magnusencoded.setlist2spotify
 
 import android.app.Application
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.magnusencoded.setlist2spotify.data.SettingsRepository
+import io.github.magnusencoded.setlist2spotify.data.photos.PhotoRepository
 import io.github.magnusencoded.setlist2spotify.data.setlistfm.FmArtist
 import io.github.magnusencoded.setlist2spotify.data.setlistfm.FmSetlist
 import io.github.magnusencoded.setlist2spotify.data.setlistfm.FmSong
@@ -34,6 +36,9 @@ data class SongMatch(
 }
 
 enum class SetlistSource { ARTIST, USER }
+
+/** A gallery photo from the night of the show, offered as the playlist cover. */
+data class CoverCandidate(val uri: Uri, val thumbnail: Bitmap?)
 
 data class UiState(
     // Settings
@@ -65,12 +70,21 @@ data class UiState(
     val matches: List<SongMatch> = emptyList(),
     val matching: Boolean = false,
     val playlistName: String = "",
+    // Cover art taken from the phone's gallery on the night of the show
+    val coverCandidates: List<CoverCandidate> = emptyList(),
+    val coverLoading: Boolean = false,
+    val selectedCoverUri: Uri? = null,
+    /** True once the gallery has been searched, so "nothing found" can be said. */
+    val coverSearched: Boolean = false,
+    val coverPermissionGranted: Boolean = false,
     // Playlist creation
     val creatingPlaylist: Boolean = false,
     val createdPlaylistUrl: String? = null,
     val createdPlaylistName: String = "",
     val createdTrackCount: Int = 0,
     val createdRefusedCount: Int = 0,
+    /** Set when the playlist was made but its cover could not be uploaded. */
+    val coverUploadError: String? = null,
     // Transient error surfaced as a snackbar
     val error: String? = null,
 )
@@ -80,6 +94,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val settings = SettingsRepository(application)
     private val setlistFm = SetlistFmClient { settings.setlistFmApiKeyValue() }
     val spotify = SpotifyClient(settings)
+    private val photos = PhotoRepository(application)
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -277,11 +292,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     included = !song.tape,
                 )
             }
-        val defaultName = buildString {
-            append(artistName.ifBlank { "Setlist" })
-            setlist.venue?.name?.let { append(" – ").append(it) }
-            setlist.eventDate?.let { append(" – ").append(it) }
-        }
+        // Year first: an alphabetical playlist library then falls into
+        // chronological order, and the show reads as "when, who, where".
+        val defaultName = listOfNotNull(
+            setlist.year(),
+            artistName.ifBlank { null },
+            setlist.venue?.name,
+        ).joinToString(" – ").ifBlank { "Setlist" }
         _state.update {
             it.copy(
                 selectedSetlist = setlist,
@@ -289,8 +306,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 matching = true,
                 playlistName = defaultName,
                 createdPlaylistUrl = null,
+                // A different show means different photos.
+                coverCandidates = emptyList(),
+                selectedCoverUri = null,
+                coverSearched = false,
+                coverUploadError = null,
             )
         }
+        loadCoverCandidates()
         matchJob = viewModelScope.launch {
             matches.forEachIndexed { index, match ->
                 val (candidates, error) = findCandidates(match.song.name, match.searchArtist)
@@ -336,6 +359,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setPlaylistName(name: String) = _state.update { it.copy(playlistName = name) }
 
+    // --- Cover art ---
+
+    /**
+     * Offers the photos taken on the night of the selected show. Silent when the
+     * gallery permission is missing: the confirm screen asks for it instead, so
+     * a permission prompt only ever follows a tap.
+     */
+    fun loadCoverCandidates() {
+        val date = _state.value.selectedSetlist?.localDate() ?: return
+        val granted = photos.hasPermission()
+        _state.update { it.copy(coverPermissionGranted = granted) }
+        if (!granted) return
+        viewModelScope.launch {
+            _state.update { it.copy(coverLoading = true) }
+            val found = photos.photosFrom(date)
+            val candidates = found.map { CoverCandidate(it.uri, photos.thumbnail(it.uri)) }
+            _state.update {
+                it.copy(coverCandidates = candidates, coverLoading = false, coverSearched = true)
+            }
+        }
+    }
+
+    /** Tapping the chosen photo again clears it, leaving Spotify's own collage. */
+    fun selectCover(uri: Uri) = _state.update {
+        it.copy(selectedCoverUri = if (it.selectedCoverUri == uri) null else uri)
+    }
+
     /** Manual re-search for one song with a user-provided query. */
     fun researchSong(index: Int, query: String) {
         if (query.isBlank()) return
@@ -379,13 +429,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             "the playlist access on the Spotify page that opens."
                     )
                 }
+                val setlist = s.selectedSetlist
                 val description = buildString {
-                    append("Setlist")
-                    s.selectedSetlist?.venueLine()?.let { append(" at ").append(it) }
-                    s.selectedSetlist?.eventDate?.let { append(" on ").append(it) }
-                    append(". Created from setlist.fm")
-                    s.selectedSetlist?.url?.let { append(": ").append(it) }
-                }
+                    append("Live at ").append(setlist?.venueLine() ?: "an unknown venue")
+                    // The name carries only the year, so the full date lives here.
+                    setlist?.readableDate()?.let { append(", ").append(it) }
+                    append(".")
+                    setlist?.tour?.name?.let { append(" ").append(it).append(".") }
+                    append(" From setlist.fm")
+                    setlist?.url?.let { append(": ").append(it) }
+                }.take(300)
                 val playlist = spotify.createPlaylist(name, description)
                 val result = try {
                     spotify.addTracks(playlist.id, tracks.map { it.uri })
@@ -398,6 +451,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         e,
                     )
                 }
+                // The songs are the point, so a cover that will not upload is
+                // reported next to the success rather than thrown over it.
+                val coverError = s.selectedCoverUri?.let { uploadCover(playlist.id, it) }
                 _state.update {
                     it.copy(
                         creatingPlaylist = false,
@@ -405,11 +461,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         createdPlaylistName = name,
                         createdTrackCount = result.added,
                         createdRefusedCount = result.refused.size,
+                        coverUploadError = coverError,
                     )
                 }
             } catch (e: Exception) {
                 fail(e)
             }
+        }
+    }
+
+    /** Returns null on success, or the reason the cover did not make it. */
+    private suspend fun uploadCover(playlistId: String, uri: Uri): String? {
+        if (!spotify.hasImageUploadScope()) {
+            return "The cover needs a permission your Spotify login predates. " +
+                "Log out in Settings and log in again to enable playlist covers."
+        }
+        val jpeg = photos.coverJpeg(uri)
+            ?: return "That photo could not be prepared as a cover."
+        return try {
+            spotify.uploadCover(playlistId, jpeg)
+            null
+        } catch (e: Exception) {
+            "The cover could not be uploaded. ${e.message}"
         }
     }
 }
