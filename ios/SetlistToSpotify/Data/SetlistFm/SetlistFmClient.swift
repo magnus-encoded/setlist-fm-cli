@@ -20,6 +20,13 @@ final class SetlistFmClient {
         var request = URLRequest(url: comps.url!)
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Mirror the working Android (okhttp) client: give setlist.fm a plain,
+        // named User-Agent instead of URLSession's default "…CFNetwork…Darwin…".
+        // The edge doesn't filter on it (verified: a CFNetwork UA still gets a
+        // clean 403 for a bad key), but the app layer might — cheap to rule out.
+        // ponytail: NOT touching Accept-Encoding — setting it by hand disables
+        // URLSession's transparent gunzip and hands back raw bytes JSON can't parse.
+        request.setValue("StationToStation/1.1", forHTTPHeaderField: "User-Agent")
 
         var backoff: UInt64 = 1_000_000_000 // 1s in ns
         let maxAttempts = 3
@@ -31,7 +38,13 @@ final class SetlistFmClient {
             case 429, 500...599: break // retry
             case 404: throw AppError("Not found (404). Check the name/ID and try again.")
             case 403: throw AppError("setlist.fm rejected the API key (403).")
-            default: throw AppError("setlist.fm error \(code)")
+            default:
+                // Surface the server's own explanation. A 406 in particular is
+                // content negotiation the request headers alone don't explain, so
+                // whatever setlist.fm says here is the ground truth we're missing.
+                let body = String(data: data, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines).prefix(300) ?? ""
+                throw AppError("setlist.fm error \(code)\(body.isEmpty ? "" : ": \(body)")")
             }
             if attempt == maxAttempts { break }
             try await Task.sleep(nanoseconds: backoff)
