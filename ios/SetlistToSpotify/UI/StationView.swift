@@ -242,7 +242,7 @@ struct StationView: View {
                 Text("Import the shows you\u{2019}ve marked attended on setlist.fm.")
                     .font(.subheadline).foregroundStyle(muted)
                     .multilineTextAlignment(.center)
-                Button("Import my concerts") { model.refreshTimeline() }
+                Button("Run network diagnostic") { model.runNetDiagnostic() } // TEMP ios-netdiag
                     .buttonStyle(.borderedProminent).tint(amber).foregroundStyle(Color.black)
             }
         }

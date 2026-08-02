@@ -154,6 +154,44 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // TEMP DIAGNOSTIC (ios-netdiag): reveal the exact headers this device puts on
+    // the wire, and setlist.fm's status for each Accept strategy. Remove before merge.
+    func runNetDiagnostic() {
+        state.timelineLoading = true
+        Task {
+            var lines: [String] = []
+            // 1. A neutral echo server shows what Accept/User-Agent actually arrive.
+            if let url = URL(string: "https://httpbin.org/headers") {
+                var r = URLRequest(url: url)
+                r.setValue("application/json", forHTTPHeaderField: "Accept")
+                r.setValue("StationToStation/1.1", forHTTPHeaderField: "User-Agent")
+                if let (d, resp) = try? await URLSession.shared.data(for: r) {
+                    let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                    let body = (String(data: d, encoding: .utf8) ?? "")
+                        .replacingOccurrences(of: "\n", with: " ")
+                    lines.append("echo \(code): \(body.prefix(400))")
+                } else {
+                    lines.append("echo: request FAILED (no response)")
+                }
+            }
+            // 2. setlist.fm status per Accept strategy, straight from this device.
+            let key = settings.setlistFmApiKeyValue ?? "<no-key>"
+            lines.append("keyLen=\(key.count)")
+            let base = "https://api.setlist.fm/rest/1.0/search/artists?artistName=radiohead&p=1"
+            for (label, accept) in [("json", "application/json"), ("any", "*/*"),
+                                    ("none", ""), ("xml", "application/xml")] {
+                var r = URLRequest(url: URL(string: base)!)
+                r.setValue(key, forHTTPHeaderField: "x-api-key")
+                if !accept.isEmpty { r.setValue(accept, forHTTPHeaderField: "Accept") }
+                let code = ((try? await URLSession.shared.data(for: r))?.1
+                    as? HTTPURLResponse)?.statusCode ?? -1
+                lines.append("sfm \(label)=\(code)")
+            }
+            state.timelineLoading = false
+            state.notice = lines.joined(separator: "\n")
+        }
+    }
+
     /// Fills in the real Festival names for the clusters currently on the
     /// timeline — one page fetch per festival, only for ones not already
     /// resolved. Failures are silent: the venue name stays as the label.
