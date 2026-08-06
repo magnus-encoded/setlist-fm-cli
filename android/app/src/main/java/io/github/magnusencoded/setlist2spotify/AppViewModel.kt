@@ -967,8 +967,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val user = _state.value.userQuery.trim()
                 if (user.isNotEmpty()) timelines.save(shows = mapOf(user to setlists))
             } catch (e: Exception) {
-                _state.update { it.copy(setlistsLoading = false) }
-                fail(e)
+                // A refresh is optional freshness, never a fatal operation: the night
+                // is already on screen from cache, with its artist, venue and date.
+                // `fail` sets the global error, and doing that here tore the screen up
+                // mid-gesture — the pull's own fling was still running, which is how a
+                // 404 on a 1985 setlist came back as "measure is called on a
+                // deactivated node". A notice says what happened and changes nothing.
+                //
+                // The id and code are logged because this only ever fails in the field,
+                // on someone else's phone, where there is no other way to find out
+                // which night and which status it was.
+                android.util.Log.w("StationToStation", "refresh failed for setlist ${open.id}: ${e.message}")
+                _state.update {
+                    it.copy(
+                        setlistsLoading = false,
+                        notice = "setlist.fm didn't have that one just now — showing what's saved.",
+                    )
+                }
             }
         }
     }
