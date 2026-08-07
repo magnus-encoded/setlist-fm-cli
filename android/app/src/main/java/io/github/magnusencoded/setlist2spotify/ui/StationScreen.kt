@@ -565,6 +565,7 @@ fun StationTimelineScreen(
                                                 onOpenEvent()
                                             }
                                         },
+                                        onRename = { i, name -> viewModel.renameAct(row.bill.id, i, name) },
                                         onSurprise = { name -> viewModel.addSurpriseAct(row.bill.id, name) },
                                         onFetchCandidates = { viewModel.fetchCandidates(row.bill.id) },
                                         onRemove = { viewModel.removeBill(row.bill.id) },

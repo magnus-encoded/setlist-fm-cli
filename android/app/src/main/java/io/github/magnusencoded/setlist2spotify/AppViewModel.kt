@@ -388,7 +388,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 playlistsBySetlist = it.playlistsBySetlist + cached.playlists(),
                 mediaBySetlist = it.mediaBySetlist + cached.media(),
                 plannedGigs = sortedPlanned(cached.planned()),
-                bills = cached.bills.values.toList(),
+                // An **Act**'s pointer is read back the same way, and for the same
+                // reason: adoption renames a night without moving its data, so a
+                // pointer minted before it is stale afterwards. This was the one map
+                // here that read raw, which is why a published act stopped opening and
+                // its night drew twice. Also heals pointers already saved stale.
+                bills = cached.bills.values.map { b ->
+                    b.copy(acts = b.acts.map { a -> if (a.gigId == null) a else a.copy(gigId = cached.keyOf(a.gigId)) })
+                },
                 logsByGig = it.logsByGig + cached.logs(),
                 attendanceByGig = it.attendanceByGig + cached.attendance(),
                 calendarEventByGig = it.calendarEventByGig + cached.calendarEvents(),
@@ -1297,6 +1304,40 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * The name on the poster, corrected — and asked about again.
+     *
+     * A lineup is copied off a wall, and the wall is not authoritative about
+     * spelling: the history says *The* Silent Majority where the programme says
+     * Silent Majority, and `fetchCandidates` matches with exact `equals`, so one
+     * character is the difference between a song pool and "no setlist.fm history".
+     * Rather than guess at normalising names nobody has seen, let the person who is
+     * standing in front of the stage fix it and ask upstream again.
+     *
+     * Clearing [StoredAct.tried] is the point: it is what makes the act eligible for
+     * a lookup at all, and the pool, matched artist and mbid go with it because they
+     * describe an answer to the *old* name.
+     *
+     * The night, if the act already has one, is deliberately untouched — it is a
+     * record of what happened, not a line on a poster.
+     */
+    fun renameAct(billId: String, actIndex: Int, name: String) {
+        val corrected = name.trim()
+        val act = _state.value.bills.firstOrNull { it.id == billId }?.acts?.getOrNull(actIndex) ?: return
+        if (corrected.isBlank() || corrected == act.name) return
+        viewModelScope.launch {
+            editBill(billId) { b ->
+                b.copy(
+                    acts = b.acts.mapIndexed { j, a ->
+                        if (j != actIndex) a
+                        else a.copy(name = corrected, candidates = emptyList(), matchedArtist = "", mbid = "", tried = false)
+                    },
+                )
+            }
+            fetchCandidates(billId)
+        }
+    }
+
+    /**
      * An **Act** that never was on the poster. Added already dated, because a
      * **Surprise** is only ever discovered after it has happened — there is no state
      * in which an unannounced act is pending.
@@ -1474,8 +1515,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         selectedSetlist = if (it.selectedSetlist?.id == gigId) fresh else it.selectedSetlist,
                     )
                 }
+                // An **Act** holds the id its night was minted with, and the line above
+                // just changed the id that night is known by. Left alone the poster
+                // points at nothing: the act's "open" leads nowhere, so the songs
+                // whoever typed them in are unreachable — and because the timeline
+                // hides a ticket only when some act claims its id, the night draws a
+                // second time beside the **Bill** it belongs to.
+                repointActs(from = gigId, to = fresh.id)
             }
         }
+    }
+
+    /**
+     * Moves every **Act**'s pointer from one gig id to another — the other half of
+     * adoption, which renames a night without moving any of its data.
+     *
+     * Touches only the **Bills** that actually point at [from], so publishing one act
+     * doesn't rewrite a festival's whole poster.
+     */
+    private suspend fun repointActs(from: String, to: String) {
+        val touched = _state.value.bills.filter { b -> b.acts.any { it.gigId == from } }
+        if (touched.isEmpty()) return
+        val updated = touched.map { b ->
+            b.copy(acts = b.acts.map { a -> if (a.gigId == from) a.copy(gigId = to) else a })
+        }
+        _state.update { s ->
+            s.copy(bills = s.bills.map { b -> updated.firstOrNull { it.id == b.id } ?: b })
+        }
+        updated.forEach { timelines.saveBill(it) }
     }
 
     /** Reads, edits and persists one **Bill**, so state and disk never disagree. */
