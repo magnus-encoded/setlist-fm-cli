@@ -1650,8 +1650,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun selectSetlist(setlist: FmSetlist) {
         matchJob?.cancel()
         val artistName = setlist.artist?.name ?: ""
-        val matches = setlist.songs()
-            .filter { it.name.isNotBlank() }
+        // A closed **Log** is a setlist. #121 put it plainly — "the app is the source
+        // of truth about what was observed and setlist.fm is a publication target" —
+        // so a night whose set I said was complete converts like any other, whether or
+        // not their record has caught up. Only when *closed*: an open Log is a night
+        // still in progress, and offering to make a playlist of the first four songs
+        // while the band is still on is not the same gesture.
+        //
+        // setlist.fm still wins where it has songs. It has the covers and the tape
+        // markers, which a typed title cannot carry.
+        val songs = setlist.songs().filter { it.name.isNotBlank() }.ifEmpty {
+            _state.value.logsByGig[setlist.id]
+                ?.takeIf { it.closed }
+                ?.named()
+                ?.map { FmSong(name = it) }
+                .orEmpty()
+        }
+        val matches = songs
             .map { song ->
                 SongMatch(
                     song = song,
