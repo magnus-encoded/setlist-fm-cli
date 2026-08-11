@@ -127,7 +127,7 @@ final class LaneGeometryTests: XCTestCase {
 
     private func festivalRow(mine: Bool, _ present: Friend...) -> WovenRow {
         WovenRow(
-            node: .festival("Tons of Rock", [FmSetlist(id: "f", artist: FmArtist(name: "A"))]),
+            node: .festival(name: "Tons of Rock", shows: [FmSetlist(id: "f", artist: FmArtist(name: "A"))]),
             mine: mine,
             others: present
         )
