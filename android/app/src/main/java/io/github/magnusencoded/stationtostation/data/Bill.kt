@@ -510,7 +510,10 @@ private fun String.words(): Set<String> =
  */
 internal fun sameSong(a: String, b: String): Boolean = a.songKey() == b.songKey()
 
-private fun String.songKey(): String = lowercase().filter { it.isLetterOrDigit() }
+// internal, not private: [rankTitles] ranks a remembered line against a catalogue and
+// has to normalise both the same way this does, or "Dont" would match here and miss
+// there. One definition, so the two cannot drift.
+internal fun String.songKey(): String = lowercase().filter { it.isLetterOrDigit() }
 
 /**
  * Does this artist have [song] anywhere in the setlists we just pulled?
