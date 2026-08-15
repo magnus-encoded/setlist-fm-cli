@@ -577,7 +577,7 @@ class BillTest {
     }
 
     private fun festivalNameOf(row: FutureRow): String =
-        ((row as FutureRow.Ticket).node as TimelineNode.Festival).name
+        ((row as FutureRow.Ticket).node as TimelineNode.Festival).label
 
     // --- A poster names the festival, never the room (#128) ---------------------
 
