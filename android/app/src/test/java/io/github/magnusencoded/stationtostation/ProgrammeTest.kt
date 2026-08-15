@@ -98,7 +98,7 @@ class ProgrammeTest {
         <ul class="flex"><li><span><span class="inline-block first-letter:uppercase">torsdag 13. august</span></span></li>
         <li><span><span class="hidden md:inline-block">kl.</span> <!-- -->15:45</span></li>
         <li><span class="h-8">Main Stage</span></li></ul></div>
-        <div><h3 class="x">Band Two</h3>
+        <div><h3 class="x">Band &amp; Band&#x27;s Friend&#160;Two &#x1F3B8;</h3>
         <ul class="flex"><li><span><span class="inline-block first-letter:uppercase">fredag 14. august</span></span></li>
         <li><span><span class="hidden md:inline-block">kl.</span> <!-- -->22:00</span></li>
         <li><span class="h-8">Tent</span></li></ul></div>
@@ -113,6 +113,16 @@ class ProgrammeTest {
         assertEquals("15:45", acts[0].start)
         assertEquals("Main Stage", acts[0].stage)
         assertEquals(listOf(LocalDate.parse("2026-08-13"), LocalDate.parse("2026-08-14")), programmeDays(acts))
+    }
+
+    @Test
+    fun `an ampersand in a band name arrives as an ampersand`() {
+        // The live page writes "Nick Cave &amp; The Bad Seeds". Stored raw, that name
+        // matches nothing a person or setlist.fm would ever write. The guitar is the
+        // code point above U+FFFF: decoded one UTF-16 unit at a time it comes out
+        // as garbage, and a band name is exactly where such a character turns up.
+        val acts = oyaProgramme(pageShape, year = 2026)
+        assertEquals("Band & Band's Friend Two 🎸", acts[1].artist)
     }
 
     @Test

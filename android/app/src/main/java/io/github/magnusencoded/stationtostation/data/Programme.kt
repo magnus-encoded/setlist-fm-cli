@@ -184,8 +184,50 @@ private val DAY = Regex("""(\d{1,2})\.\s*(\p{L}+)""")
 private val CLOCK = Regex("""([0-2]\d:[0-5]\d)""")
 private val TAGS = Regex("""<!--.*?-->|<[^>]+>""", RegexOption.DOT_MATCHES_ALL)
 
-/** Markup out, text in — the pages put artist names inside nested spans and comments. */
-private fun String.text(): String = TAGS.replace(this, "").replace(Regex("""\s+"""), " ").trim()
+private val ENTITY = Regex("""&(#x[0-9a-fA-F]+|#\d+|\w+);""")
+private val NAMED = mapOf(
+    "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'", "nbsp" to " ",
+)
+
+/**
+ * Entities back into characters, because a name is what a person reads, not what a
+ * page encodes. Øya's own headliner is written `Nick Cave &amp; The Bad Seeds`, and an
+ * act stored that way never matches the **Gig** pasted from setlist.fm — the ampersand
+ * is the join between the programme and the timeline, and it has to be an ampersand.
+ *
+ * ponytail: no HTML parser and not `android.text.Html`, which would drag the whole
+ * parser onto a device and out of the JVM tests. The named list is the five that mean
+ * anything in a band name; anything numeric is decoded outright.
+ *
+ * `Character.toChars` and not `toChar()`: the latter narrows an `Int` and would turn
+ * every code point above U+FFFF into garbage — a band name is exactly the place an
+ * emoji or a rare script turns up. Anything outside Unicode is left as written.
+ */
+private fun String.entities(): String = ENTITY.replace(this) { m ->
+    val e = m.groupValues[1]
+    when {
+        e.startsWith("#x") -> e.drop(2).toIntOrNull(16)?.codePoint()
+        e.startsWith("#") -> e.drop(1).toIntOrNull()?.codePoint()
+        else -> NAMED[e]
+    } ?: m.value
+}
+
+/** A code point as text, or null if it is not one — `toChars` throws on the rest. */
+private fun Int.codePoint(): String? =
+    if (Character.isValidCodePoint(this)) String(Character.toChars(this)) else null
+
+/**
+ * Markup out, text in — the pages put artist names inside nested spans and comments.
+ *
+ * Stripping runs before decoding, so `&lt;b&gt;` in the source survives as the literal
+ * text `<b>`. That is right for a name a person reads, and safe only because the
+ * result is a display string and a match key: it goes to a Compose `Text`, which
+ * renders characters and not markup. Never hand it to a WebView or `Html.fromHtml`.
+ */
+private fun String.text(): String =
+    // Collapse after decoding, and count a decoded non-breaking space as a space: the
+    // page uses one to hold a name together, and it is a space to everyone reading it.
+    TAGS.replace(this, "").entities().replace(Regex("""[\s\u00A0]+"""), " ").trim()
 
 /**
  * Øya's programme page into acts. Pure: hand it the HTML, however you got it.
