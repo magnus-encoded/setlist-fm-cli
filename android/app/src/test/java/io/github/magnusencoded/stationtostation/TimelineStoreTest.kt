@@ -660,8 +660,12 @@ class TimelineStoreTest {
     fun `correcting a Log that predates the field keeps the two lists parallel`() =
         runBlocking {
             val file = File.createTempFile("timelines", ".json")
+            // The Gig record matters: withGig() mints a night for a key it does not
+            // already hold, so a Log with no Gig would be saved under a derived id.
             file.writeText(
-                """{"gigLogs":{"g1":{"songs":["","All held together by toothpicks and gum",""" +
+                """{"gigs":{"g1":{"id":"g1","date":"07-08-2026","artist":"Øyvind Holm",""" +
+                    """"venue":"Verandaen, Skotbu","createdAt":1}},""" +
+                    """"gigLogs":{"g1":{"songs":["","All held together by toothpicks and gum",""" +
                     """"","Between Stations"],"closed":true}}}"""
             )
             val store = TimelineStore(file)
