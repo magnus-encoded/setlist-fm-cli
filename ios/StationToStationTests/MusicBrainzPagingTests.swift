@@ -98,13 +98,19 @@ final class MusicBrainzPagingTests: XCTestCase {
     func testTheCapLimitsWhatComesBack() async {
         StubProtocol.bodies = [page(count: 3, ["One", "Two", "Three"])]
 
-        XCTAssertEqual(["One", "Two"], await client().catalogue(mbid: "mb-1", cap: 2))
+        // Bound to a local first: XCTAssert's arguments are autoclosures, which cannot
+        // carry an await.
+        let titles = await client().catalogue(mbid: "mb-1", cap: 2)
+
+        XCTAssertEqual(["One", "Two"], titles)
     }
 
     /// A blank mbid asks nothing at all. Nobody is served by a request we know is
     /// meaningless, least of all a source that rate-limits.
     func testABlankMbidNeverReachesTheNetwork() async {
-        XCTAssertEqual([], await client().catalogue(mbid: "  "))
+        let titles = await client().catalogue(mbid: "  ")
+
+        XCTAssertEqual([], titles)
         XCTAssertTrue(StubProtocol.requests.isEmpty)
     }
 
@@ -114,7 +120,9 @@ final class MusicBrainzPagingTests: XCTestCase {
         StubProtocol.status = 503
         StubProtocol.bodies = [page(count: 1, ["Between Stations"])]
 
-        XCTAssertEqual([], await client().catalogue(mbid: "mb-1"))
+        let titles = await client().catalogue(mbid: "mb-1")
+
+        XCTAssertEqual([], titles)
     }
 }
 
