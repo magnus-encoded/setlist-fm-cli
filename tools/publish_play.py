@@ -37,6 +37,11 @@ def main() -> int:
     p.add_argument("--rollout", type=float, metavar="FRACTION",
                    help="staged roll-out fraction, e.g. 0.1 — production only")
     p.add_argument("--name", help="release name (default: Play's auto-generated one)")
+    # What the bundle *would* be if uploaded. Lets a rebuild of an already
+    # published tag skip the upload Play would reject and go straight to the
+    # track change, which is the whole point of promoting a build.
+    p.add_argument("--version-code", type=int,
+                   help="skip the upload if this versionCode is already in the library")
     # Committing is opt-in rather than opt-out. Without the edit, an upload is a
     # bundle sitting in the library harming nobody; with it, someone's phone
     # updates. The dangerous direction should be the one you have to type.
@@ -61,19 +66,29 @@ def main() -> int:
 
     edit_id = edits.insert(body={}, packageName=PACKAGE).execute()["id"]
 
-    # Play refuses a versionCode it has already seen, so re-running a publish —
-    # a retried CI job, or a manual dispatch to move an existing build to another
-    # track — would die on the upload rather than doing the part that matters.
-    # Matching on the bundle's own digest makes the upload a no-op when this
-    # exact file is already in the library, which is what "re-run" should mean.
-    digest = hashlib.sha1(open(args.aab, "rb").read()).hexdigest()
-    known = {b["sha1"]: b["versionCode"]
-             for b in edits.bundles().list(
-                 packageName=PACKAGE, editId=edit_id).execute().get("bundles", [])}
+    # Play refuses a versionCode it has already seen, so re-running a publish
+    # would die on the upload rather than doing the part that matters.
+    #
+    # Two ways that happens, and they need different answers. A retried job hands
+    # over the same file, so the sha1 finds it. A dispatch re-*builds* the tag:
+    # same versionCode, different bytes — zip timestamps and the signing nonce
+    # see to that — so the sha1 misses and only the number identifies it. Hence
+    # --version-code, which the workflow already knows and passes.
+    bundles = edits.bundles().list(
+        packageName=PACKAGE, editId=edit_id).execute().get("bundles", [])
+    by_sha = {b["sha1"]: b["versionCode"] for b in bundles}
+    codes = {b["versionCode"] for b in bundles}
 
-    if digest in known:
-        version_code = known[digest]
-        print(f"versionCode {version_code} already uploaded; reusing it", flush=True)
+    digest = hashlib.sha1(open(args.aab, "rb").read()).hexdigest()
+
+    if args.version_code in codes:
+        version_code = args.version_code
+        print(f"versionCode {version_code} is already in the library; "
+              "releasing it without re-uploading", flush=True)
+    elif digest in by_sha:
+        version_code = by_sha[digest]
+        print(f"this exact bundle is already uploaded as {version_code}; reusing it",
+              flush=True)
     else:
         # Resumable: a 12MB body over a flaky link is worth retrying in pieces
         # rather than restarting a release because one TCP connection died.

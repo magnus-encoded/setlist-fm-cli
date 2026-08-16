@@ -172,9 +172,12 @@ jobs:
             exit 0
           fi
           pip install --quiet google-api-python-client google-auth
+          # --version-code so a dispatched re-run of an already published tag
+          # promotes the existing bundle instead of trying to upload a rebuild
+          # of it, which Play rejects as a duplicate versionCode.
           python tools/publish_play.py \
             android/app/build/outputs/bundle/release/app-release.aab \
-            --track "$TRACK" --commit
+            --track "$TRACK" --version-code "$VERSION_CODE" --commit
 
       - name: Delete the keystore
         if: always()
