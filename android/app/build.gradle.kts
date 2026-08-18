@@ -36,7 +36,7 @@ val gitSha: String = runCatching {
 
 android {
     namespace = "io.github.magnusencoded.stationtostation"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.magnusencoded.stationtostation"
