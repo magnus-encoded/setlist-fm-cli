@@ -10,6 +10,9 @@ private let raised = Color(red: 0x17 / 255, green: 0x12 / 255, blue: 0x1F / 255)
 private let ink = Color(red: 0xED / 255, green: 0xE9 / 255, blue: 0xF2 / 255)
 private let muted = Color(red: 0x8B / 255, green: 0x82 / 255, blue: 0x99 / 255)
 private let faint = Color(red: 0x5A / 255, green: 0x53 / 255, blue: 0x68 / 255)
+/// Mine. Never "the accent colour" — it means *mine*, at every Resolution
+/// (same mark StationView draws its Spine with).
+private let amber = Color(red: 0xE7 / 255, green: 0xB2 / 255, blue: 0x4C / 255)
 
 /// A row of the night: an encore divider, or a performed song (numbered; a tape
 /// track has no number — it played but is not one of the band's songs).
@@ -52,8 +55,17 @@ struct GigView: View {
                         } else {
                             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in songRow(row) }
                         }
+                        plannedActions(show)
                         // The night's grid (#99): what I shot, under what was played.
                         NightGrid()
+                        // A Note is media too (#50, #170): a draft in the vault, a
+                        // letter in the shared band, and the Preamble composed
+                        // above it from what the record already knows.
+                        NightNotes(preamble: gigPreamble(show), senderName: senderName)
+                        // My own Log (#169), and it is never taken away — this
+                        // renders on a night's page forever after, same as the
+                        // grid above it.
+                        LogEditor(setlist: show)
                     }
                     .padding(.top, 8)
                 }
@@ -69,6 +81,20 @@ struct GigView: View {
                     // left" — a shape, where every other control here is named by
                     // what it does.
                     .accessibilityLabel("Back")
+            }
+            // The light switch (#180): a visible icon button (Android's is a bare
+            // gesture on the timeline; GigView's swipes are already claimed by
+            // back and the playlist, so a toolbar button is the reversible
+            // choice here). VoiceOver gets the same verb-phrased label Android's
+            // custom action uses rather than the symbol's own name.
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { model.toggleContactLight() } label: {
+                    Image(systemName: model.state.contactLight ? "lightswitch.on" : "lightswitch.off")
+                }
+                .tint(model.state.contactLight ? amber : faint)
+                .accessibilityLabel(model.state.contactLight
+                    ? "Turn the contact light off"
+                    : "Turn the contact light on, see this night as a Contact does")
             }
         }
         .toolbarBackground(ground, for: .navigationBar)
@@ -86,27 +112,101 @@ struct GigView: View {
         .accessibilityAction(named: "Make a Spotify playlist") {
             if !rows.isEmpty { nav.push(.confirm) }
         }
+        .accessibilityAction(named: model.state.contactLight
+            ? "Turn the contact light off"
+            : "Turn the contact light on, see this night as a Contact does") {
+            model.toggleContactLight()
+        }
         // Back is a chevron with no label, and the swipe that also does it is a
         // gesture VoiceOver consumes.
         .accessibilityAction(.escape) { nav.pop() }
     }
 
+    /// The night's own facts, for the Preamble over a Note (#50). Derived on
+    /// every render and never stored: Reconcile has no time bound, so who the
+    /// record knows was here changes, and a frozen sentence would be the app
+    /// putting words in my mouth about an evening it has since learned more
+    /// about.
+    private func gigPreamble(_ show: FmSetlist) -> String {
+        let alsoThere = model.state.friends.filter { f in
+            !f.setlistfm.isEmpty && (model.state.showsByFriend[f.setlistfm] ?? []).contains { $0.id == show.id }
+        }.map(\.name)
+        return preamble(people: alsoThere, venue: show.venue?.name, songCount: show.performed().count)
+    }
+
+    /// A sender is a public key (#28) and a Contact's name lives on the
+    /// friends list under a setlist.fm handle. Nothing joins the two yet, so
+    /// the promise degrades to "someone else" rather than inventing a name.
+    private func senderName(_ key: String) -> String? {
+        model.state.friends.first { $0.setlistfm == key }?.name
+    }
+
     private func header(_ show: FmSetlist) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // A night I'm going to, not one I was at (#175's claim, not `gigPlanned`
+        // membership). Manual check-in (#174) is the only one there is when
+        // location was refused or the venue couldn't be geocoded — same night
+        // window as the ambient offer, no location involved at all.
+        let provenance = model.state.selectedAttendance?.provenance
+        let planned = isPlanned(provenance)
+        let checkedIn = provenance == "checked_in"
+        return VStack(alignment: .leading, spacing: 4) {
             Text(show.readableDate() ?? "Unknown date")
                 .font(.system(size: 11, weight: .semibold)).kerning(1).foregroundStyle(faint)
             Text(show.artist?.name ?? "Unknown artist")
                 .font(.system(size: 26, design: .serif)).foregroundStyle(ink)
             Text(show.venueLine()).font(.system(size: 14)).foregroundStyle(muted)
-            // ponytail: no tags here yet. The self-logged tag this comment used to
-            // wait on is gone from Android too — it labelled the default state and
-            // so said nothing. What replaced it is a "checked in" badge (needs the
-            // attendance provenance the store carries but this model never loads;
-            // #29 is Android-only) and a chip showing the setlist.fm id, or "local"
-            // where the Gig has none. Wire both when an iOS check-in lands.
+            if checkedIn {
+                Text("\u{2713} checked in").font(.system(size: 13)).foregroundStyle(amber)
+                    .padding(.top, 6)
+            } else if planned, canCheckInManually(gig: show, now: Date()) {
+                Text("I'm here — check in").font(.system(size: 13)).foregroundStyle(amber)
+                    .padding(.top, 6)
+                    .onTapGesture { model.checkIn(show.id) }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 24).padding(.bottom, 16)
+    }
+
+    /// Calendar, maps and "I'm not going" (#175) — only for a gig I actually hold a
+    /// ticket for. The calendar offer stops once the night has passed: a gig that
+    /// already happened has nothing left to put on a calendar, exactly the `planAhead`
+    /// gate Android's leaf uses. Maps has no such gate — a venue is worth finding
+    /// whether the night is ahead or behind.
+    @ViewBuilder
+    private func plannedActions(_ show: FmSetlist) -> some View {
+        if model.state.plannedGigs.contains(where: { $0.id == show.id }) {
+            let timeState = show.eventDate.flatMap { gigTimeState(now: Date(), gigDate: $0) }
+            let calendarEventId = model.state.calendarEventByGig[show.id]
+            let mapsQuery = venueMapsQuery(venueName: show.venue?.name, city: show.venue?.city?.name)
+            VStack(alignment: .leading, spacing: 10) {
+                if timeState != .past {
+                    if calendarEventId != nil {
+                        Label("Added to your calendar", systemImage: "checkmark.circle")
+                            .foregroundStyle(muted)
+                    } else {
+                        Button { model.addToCalendar(show) } label: {
+                            Label("Add to calendar", systemImage: "calendar.badge.plus")
+                        }
+                    }
+                }
+                if let mapsQuery {
+                    Button { openVenueInMaps(mapsQuery) } label: {
+                        Label("Open in Maps", systemImage: "map")
+                    }
+                }
+                Button(role: .destructive) {
+                    model.removePlannedGig(show.id)
+                    nav.pop()
+                } label: {
+                    Text("I'm not going")
+                }
+            }
+            .font(.system(size: 14))
+            .foregroundStyle(ink)
+            .tint(ink)
+            .padding(.horizontal, 24).padding(.top, 14)
+        }
     }
 
     @ViewBuilder
