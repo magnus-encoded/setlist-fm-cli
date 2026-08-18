@@ -57,7 +57,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -314,14 +313,6 @@ fun StationTimelineScreen(
                     IconButton(onClick = onOpenConnect) {
                         Icon(Icons.Filled.Person, contentDescription = "Connect with people", tint = Faint)
                     }
-                    // Ungated since #225. It used to appear only once `setlists` had
-                    // something in it, which is fine while setlist.fm is the only way
-                    // in — but a timeline built by hand never fills `setlists`, so the
-                    // gate hid the "add" affordance from precisely the user who has no
-                    // other one.
-                    IconButton(onClick = onOpenImport) {
-                        Icon(Icons.Filled.Add, contentDescription = "Add shows", tint = Faint)
-                    }
                     IconButton(onClick = onOpenProgramme) {
                         Icon(
                             Icons.Filled.Schedule,
@@ -442,24 +433,20 @@ fun StationTimelineScreen(
                     // boolean and made the actions a consequence of reading a caption.
                     val scope = rememberCoroutineScope()
                     val pull = remember { Animatable(0f) }
-                    // 160dp of gap over 320dp of finger: enough travel to separate two
-                    // detents by more than a twitch, and enough drag that neither is
-                    // reached by an ordinary flick at the top of the list.
-                    val pullMax = with(LocalDensity.current) { 160.dp.toPx() }
+                    // 200dp of gap: enough travel to separate three detents by more than
+                    // a twitch, and enough drag that none is reached by an ordinary flick
+                    // at the top of the list.
+                    val pullMax = with(LocalDensity.current) { 200.dp.toPx() }
                     val haptics = LocalHapticFeedback.current
                     val pullNest = remember {
                         object : NestedScrollConnection {
                             /** Last detent crossed, so each one ticks once. */
                             var lastArmed = PlanningDoor.None
 
-                            override fun onPostScroll(
-                                consumed: Offset,
-                                available: Offset,
-                                source: NestedScrollSource,
-                            ): Offset {
-                                if (available.y <= 0f || source != NestedScrollSource.UserInput) return Offset.Zero
+                            /** Move the gap by a raw drag delta, ticking on each detent. */
+                            fun drag(dy: Float) {
                                 scope.launch {
-                                    pull.snapTo((pull.value + available.y * 0.5f).coerceAtMost(pullMax))
+                                    pull.snapTo((pull.value + dy * PullDamping).coerceIn(0f, pullMax))
                                     // A detent you cannot feel is a threshold, and two
                                     // outcomes separated by a bare distance are a coin
                                     // flip in the hand.
@@ -471,6 +458,32 @@ fun StationTimelineScreen(
                                         }
                                     }
                                 }
+                            }
+
+                            override fun onPreScroll(
+                                available: Offset,
+                                source: NestedScrollSource,
+                            ): Offset {
+                                // Closing has to happen *before* the list sees the drag,
+                                // or the list eats it and the gap never comes back up.
+                                // See curtainTakes for why.
+                                if (source != NestedScrollSource.UserInput) return Offset.Zero
+                                val take = curtainTakes(available.y, pull.value)
+                                if (take == 0f) return Offset.Zero
+                                drag(take)
+                                return Offset(0f, take)
+                            }
+
+                            override fun onPostScroll(
+                                consumed: Offset,
+                                available: Offset,
+                                source: NestedScrollSource,
+                            ): Offset {
+                                // Opening: only the leftover downward scroll at the list's
+                                // own top edge reaches here, so this never steals an
+                                // ordinary scroll. Upward is handled in onPreScroll above.
+                                if (available.y <= 0f || source != NestedScrollSource.UserInput) return Offset.Zero
+                                drag(available.y)
                                 return Offset(0f, available.y)
                             }
 
@@ -480,6 +493,7 @@ fun StationTimelineScreen(
                                 when (armedDoor(pull.value / pullMax)) {
                                     PlanningDoor.Gig -> adding = true
                                     PlanningDoor.Bill -> addingBill = true
+                                    PlanningDoor.Import -> onOpenImport()
                                     PlanningDoor.None -> {}
                                 }
                                 lastArmed = PlanningDoor.None
@@ -658,26 +672,18 @@ fun StationTimelineScreen(
                                         CustomAccessibilityAction("Add a festival lineup") {
                                             addingBill = true; true
                                         },
+                                        CustomAccessibilityAction("Import your setlist.fm history") {
+                                            onOpenImport(); true
+                                        },
                                     )
                                 },
                         ) {
-                            // The top of the line. Three rows used to sit here, one of
-                            // which — "↑ THE FUTURE" — explained a direction the layout
-                            // already states by being above today. Gone.
-                            //
-                            // The two ways in live in the curtain now. They stay here as
-                            // well only while there is nothing above today: a line with
-                            // a Bill and a ticket on it demonstrates that the future has
-                            // things in it, an empty one has nothing to learn from and
-                            // no reason to guess that pulling it would help.
-                            item {
-                                FuturePrompt(
-                                    open = future.isEmpty(),
-                                    loading = state.planningLoading,
-                                    onAdd = { adding = true },
-                                    onAddBill = { addingBill = true },
-                                )
-                            }
+                            // The top of the line. Nothing sits here now but the lookup
+                            // notice: "↑ THE FUTURE" captioned a direction the layout
+                            // already states, and the add-rows that outlived it were the
+                            // curtain's doors printed a second time — the doors were
+                            // meant to *replace* them, not join them.
+                            item { FuturePrompt(loading = state.planningLoading) }
                             // Everything above today, in one date-ordered list —
                             // furthest out first, the same descending order the attended
                             // rows below use. Bills and tickets interleave because they
@@ -885,45 +891,18 @@ fun StationTimelineScreen(
 }
 
 /**
- * Top of the timeline — the future. The line runs on above today, and the gigs I hold
- * a ticket for hang off it, so this is a way in rather than the dead end it was.
+ * Top of the timeline — the future. Only ever a notice now: the ways in are the doors
+ * inside the curtain, and printing them here too made the pull decorative.
  */
 @Composable
-private fun FuturePrompt(open: Boolean, loading: Boolean, onAdd: () -> Unit, onAddBill: () -> Unit) {
-    if (loading) {
-        Text(
-            "Looking it up on setlist.fm…",
-            color = Faint,
-            fontSize = 12.sp,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 14.dp),
-        )
-        return
-    }
-    // Nothing at all when the curtain is shut and the line already runs on above
-    // today. "↑ THE FUTURE" captioned a direction that being above today already
-    // states, and two permanent add-rows made three lines at the top of a timeline
-    // for a thing you do twice a year.
-    if (!open) return
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 18.dp),
-    ) {
-        Text(
-            "+  a gig you're going to",
-            color = Slate,
-            fontSize = 13.sp,
-            modifier = Modifier.clickable(onClick = onAdd).padding(vertical = 8.dp),
-        )
-        // The other door: a festival whose lineup is known and whose nights are not,
-        // which the setlist.fm link above cannot express because there is no link.
-        Text(
-            "+  a festival lineup",
-            color = Slate,
-            fontSize = 13.sp,
-            modifier = Modifier.clickable(onClick = onAddBill).padding(vertical = 8.dp),
-        )
-    }
+private fun FuturePrompt(loading: Boolean) {
+    if (!loading) return
+    Text(
+        "Looking it up on setlist.fm…",
+        color = Faint,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 14.dp),
+    )
 }
 
 /**
@@ -2775,6 +2754,10 @@ fun StationEventScreen(
     val act = setlist?.let { viewModel.actFor(it.id) }
     val localGig = setlist != null && setlist.isLocal()
     val canLog = setlist != null && (checkedIn || localGig)
+    // Whose catalogue to offer when correcting an entry: the night's own setlist.fm
+    // record first, the **Bill** **Act** behind it second. Hoisted above the Log
+    // editor because the pull-to-refresh curtain (below) needs the same answer.
+    val catalogueArtist = setlist?.artist?.mbid?.ifBlank { null } ?: act?.mbid
     // The state of this **Gig**, as known — one value, decided once (#129). Everything
     // on this screen is a rendering of this link's state, and before this each part
     // worked it out again from a different subset and they disagreed.
@@ -2789,10 +2772,22 @@ fun StationEventScreen(
         songCount = setlist?.performed()?.size ?: 0,
         calendarEvent = calendarEventUri,
     )
-    // The phase comes off the same value as the offers, so the two cannot disagree.
-    // The alcove and the curtain are not dispatched from yet: two of the four curtains
-    // want the artist's catalogue, and that client is #125/#126 and not built.
-    val leaf = gigOffers(gigAsKnown, LocalDateTime.now()).phase
+    // The phase and the curtain come off the same value as the offers, so they cannot
+    // disagree. The alcove is still not dispatched from — the swipe's action order is
+    // a separate, deliberately deferred change (#129).
+    val offers = gigOffers(gigAsKnown, LocalDateTime.now())
+    val leaf = offers.phase
+    // What pulling the curtain down asks for, decided by the same fold that draws the
+    // chip — never the same request on a night three weeks away, a night being stood
+    // at, and a night from 1992. The dispatch itself (`curtainAction`) is pure and
+    // tested; only the plumbing it names lives here.
+    val onPullToRefresh: () -> Unit = {
+        when (curtainAction(offers.curtain)) {
+            CurtainAction.FETCH_CATALOGUE -> catalogueArtist?.let(viewModel::fetchCatalogue)
+            CurtainAction.FETCH_SETLIST -> viewModel.refreshSelectedSetlist()
+            CurtainAction.NONE -> {}
+        }
+    }
     // **Publish**: explicit, labelled, and never a side effect of anything else. The
     // clipboard is the entire channel — setlist.fm's form takes no prefill parameters
     // and its Text Field editor takes a whole ordered set in one paste — so the copy
@@ -3150,8 +3145,9 @@ fun StationEventScreen(
         // Pull down to re-fetch: you log the night here, go type the songs in on
         // setlist.fm, and come back to a screen that still says there's no setlist.
         PullToRefreshBox(
-            isRefreshing = state.setlistsLoading,
-            onRefresh = viewModel::refreshSelectedSetlist,
+            isRefreshing = state.setlistsLoading ||
+                (catalogueArtist != null && state.catalogueFetching == catalogueArtist),
+            onRefresh = onPullToRefresh,
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
             LazyColumn(
@@ -3402,13 +3398,11 @@ fun StationEventScreen(
                 if (canLog) {
                     item {
                         Spacer(Modifier.height(6.dp))
-                        // Whose catalogue to offer when correcting an entry: the night's
-                        // own setlist.fm record first, the **Bill** **Act** behind it
-                        // second. Only the Act was read before, so a night that arrived
-                        // from setlist.fm — which is most of them — had no catalogue at
-                        // all and fell back to typing the title by hand, which is the
-                        // workflow #126 exists to remove.
-                        val catalogueArtist = setlist.artist?.mbid?.ifBlank { null } ?: act?.mbid
+                        // catalogueArtist is hoisted above (the pull-to-refresh curtain
+                        // needs it too). Only the Act was read before it existed, so a
+                        // night that arrived from setlist.fm — which is most of them —
+                        // had no catalogue at all and fell back to typing the title by
+                        // hand, which is the workflow #126 exists to remove.
                         LogEditor(
                             candidates = act?.candidates.orEmpty(),
                             poolArtist = act?.matchedArtist.orEmpty(),

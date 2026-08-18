@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.sp
  * one, which is the same argument that deleted "↑ THE FUTURE" carried to its end: the
  * rows are what the curtain is for.
  */
-internal enum class PlanningDoor { None, Gig, Bill }
+internal enum class PlanningDoor { None, Gig, Bill, Import }
 
 // Per file, as everywhere else in this package.
 private val LineCol = Color(0xFF2E2740)
@@ -39,19 +39,41 @@ private val Faint = Color(0xFF5A5368)
 private val Slate = Color(0xFF6D7E9B) // the future, a cooler light
 
 /**
- * The two commitment points, as a fraction of the curtain's full travel.
+ * The three commitment points, as a fraction of the curtain's full travel.
  *
- * They are detents rather than one threshold: two outcomes separated by a bare distance
- * is a coin flip in the hand. Each has a label that lights when you reach it and a tick
+ * They are detents rather than one threshold: outcomes separated by a bare distance
+ * are a coin flip in the hand. Each has a label that lights when you reach it and a tick
  * of haptic feedback as you cross, so the choice is felt on the way rather than found
  * out on release. The dead band below [GigDetent] is what keeps a short pull cheap to
  * abandon — the gesture has to be able to mean nothing.
  */
-internal const val GigDetent = 0.45f
-internal const val BillDetent = 0.85f
+internal const val GigDetent = 0.35f
+internal const val BillDetent = 0.62f
+internal const val ImportDetent = 0.88f
+
+/**
+ * Finger-to-gap ratio: the gap grows at half the speed of the drag, so the travel is
+ * felt as weight rather than as a panel stuck to the fingertip.
+ */
+internal const val PullDamping = 0.5f
+
+/**
+ * How much of an upward drag the open gap takes for itself, before the list sees any.
+ *
+ * The list can always scroll down into the past, so it consumed every upward delta and
+ * left nothing over: the gap stayed open with a door still armed while the timeline moved
+ * behind it. While the gap is open the drag is the curtain's — but only as far as the
+ * distance that shuts it ([pull] px of gap ÷ the damping), so a drag that closes it early
+ * still scrolls with what's left rather than dying in the curtain.
+ *
+ * [dy] and the result are raw drag pixels, negative upward.
+ */
+internal fun curtainTakes(dy: Float, pull: Float): Float =
+    if (dy >= 0f || pull <= 0f) 0f else dy.coerceAtLeast(-pull / PullDamping)
 
 /** Which door a pull this deep has armed. [progress] is 0f..1f of the curtain's travel. */
 internal fun armedDoor(progress: Float): PlanningDoor = when {
+    progress >= ImportDetent -> PlanningDoor.Import
     progress >= BillDetent -> PlanningDoor.Bill
     progress >= GigDetent -> PlanningDoor.Gig
     else -> PlanningDoor.None
@@ -59,10 +81,10 @@ internal fun armedDoor(progress: Float): PlanningDoor = when {
 
 /**
  * The gap that opens when you pull down past the top of your line: the line keeps going
- * up, into the shows you haven't been to yet — and the two ways in hang in that gap.
+ * up, into the shows you haven't been to yet — and the three ways in hang in that gap.
  *
  * They reveal from the bottom up as the gap grows, so the first one you can see is the
- * first one you can reach. The armed one is lit; the other is not. Releasing takes the
+ * first one you can reach. The armed one is lit; the others are not. Releasing takes the
  * lit one and nothing else, and releasing with none lit closes the gap.
  */
 @Composable
@@ -84,6 +106,9 @@ internal fun PlanningPull(progress: () -> Float, heightPx: () -> Float) {
     ) {
         Box(Modifier.width(2.dp).height(20.dp).background(LineCol))
         Spacer(Modifier.height(10.dp))
+        // Import, being the deepest and rarest pull, reveals first — the two doors
+        // reached sooner sit below it, closest to the line.
+        Door("your setlist.fm history", lit = armed == PlanningDoor.Import)
         Door("a festival lineup", lit = armed == PlanningDoor.Bill)
         Door("a gig you're going to", lit = armed == PlanningDoor.Gig)
         Spacer(Modifier.height(4.dp))

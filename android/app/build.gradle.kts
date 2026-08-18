@@ -7,16 +7,6 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
-    id("app.cash.paparazzi") version "1.3.5"
-}
-
-// Lets the Compose Preview extension re-render selectively without forcing
-// a full rebuild: the filter env var becomes a tracked test input.
-tasks.withType<Test>().configureEach {
-    inputs.property(
-        "composePreviewFilter",
-        providers.environmentVariable("COMPOSE_PREVIEW_FILTER").orElse("")
-    )
 }
 
 // Bundled credentials so users get one-tap "Log in with Spotify" and never
@@ -46,12 +36,12 @@ val gitSha: String = runCatching {
 
 android {
     namespace = "io.github.magnusencoded.stationtostation"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.github.magnusencoded.stationtostation"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         // Play requires versionCode to be strictly increasing and never accepts the
         // same one twice, so on a release build it comes from the commit count —
         // an int that only climbs, resets never, and can be recovered from any
@@ -144,9 +134,13 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+kotlin {
+    // Use the JVM toolchain and the compilerOptions DSL instead of kotlinOptions.jvmTarget
+    jvmToolchain(17)
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
+}
 
     buildFeatures {
         compose = true

@@ -144,6 +144,14 @@ struct StoredMedia: Codable, Equatable {
         static let unknown = "unknown"
     }
 
+    /// A Verdict on the night, carried by the Note it was written on. Down,
+    /// up, double-up, or nil for unset — see `verdict` below.
+    enum Verdict {
+        static let down = "down"
+        static let up = "up"
+        static let doubleUp = "double_up"
+    }
+
     var id: String = ""
     /// `Kind`. A plain string, not an enum, for the reason `provenance` is one.
     var kind: String = Kind.photo
@@ -528,6 +536,18 @@ actor TimelineStore {
             guard let id = c.gigIdOrNil(setlistId) else { return c }
             c.gigPlanned[id] = nil
             if c.gigAttendance[id]?.provenance == "planned" { c.gigAttendance[id] = nil }
+            return c
+        }
+    }
+
+    /// Remembers the calendar event made for a planned gig, by its EventKit identifier
+    /// (#175). The counterpart to Android's `markCalendarAdded`, which keeps a content
+    /// URI in the same field — both are just "the handle that proves an event exists".
+    func markCalendarAdded(gigId: String, eventId: String) {
+        writeMerged { cache in
+            var c = cache
+            let id = c.withGig(gigId)
+            c.gigCalendarEvent[id] = eventId
             return c
         }
     }

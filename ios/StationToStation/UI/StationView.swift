@@ -52,6 +52,10 @@ struct StationView: View {
     /// has ended and settled into `model.state.zoomedOut`. View-local: it is
     /// visual feedback for a gesture in flight, not app state to persist.
     @State private var dragFraction: CGFloat?
+    /// The paste-a-link entry point for the future edge (#175). A sheet's-worth of
+    /// state, not model state: it exists only while the alert is open.
+    @State private var addingPlanned = false
+    @State private var plannedLink = ""
 
     private var lanes: [Friend] { model.state.friends }
 
@@ -83,7 +87,7 @@ struct StationView: View {
         let s = model.state
         ZStack {
             ground.ignoresSafeArea()
-            if s.timelineShows.isEmpty {
+            if s.timelineShows.isEmpty && s.plannedGigs.isEmpty {
                 empty(loading: s.timelineLoading)
             } else {
                 timeline
@@ -145,6 +149,26 @@ struct StationView: View {
         .onChange(of: model.state.zoomedOut) { open in
             if open { model.loadFriendTimelines() }
         }
+        // Check-in (#174): opening the timeline takes one fix and compares it
+        // against what's already known. Foreground, one-shot, nothing
+        // scheduled. The permission is only ever asked for on a night there is
+        // something to check into — never merely for opening the app.
+        .task {
+            guard await model.checkInDue() else { return }
+            if model.hasLocationPermission() { model.offerCheckIn() }
+            else { model.requestLocationPermission() }
+        }
+        .sheet(item: Binding(
+            get: { model.state.checkInOffer },
+            set: { if $0 == nil { model.dismissCheckInOffer() } }
+        )) { gig in
+            CheckInDialog(
+                gig: gig,
+                onCheckIn: { model.checkIn(gig.id) },
+                onDismiss: { model.dismissCheckInOffer() }
+            )
+            .presentationDetents([.fraction(0.3)])
+        }
     }
 
     private var wordmark: some View {
@@ -163,6 +187,8 @@ struct StationView: View {
             // The converter is not gone — it lives behind search, as on Android.
             Button { nav.push(.search) } label: { Image(systemName: "magnifyingglass") }
             Button { nav.push(.friends) } label: { Image(systemName: "person.2") }
+            Button { nav.push(.programme) } label: { Image(systemName: "clock") }
+                .accessibilityLabel("Festival programme")
             Button { model.refreshTimeline() } label: {
                 if model.state.timelineLoading { ProgressView() }
                 else { Image(systemName: "arrow.clockwise") }
@@ -226,19 +252,54 @@ struct StationView: View {
         }
     }
 
-    /// The future edge: the Line runs on above today. Planned Gigs (#31, not yet
-    /// imported on iOS) would hang here as slate hollow rings — never amber.
+    /// The future edge: the Line runs on above today (#175). A gig I hold a ticket for
+    /// hangs here, furthest-future first — the same order the attended rows below use,
+    /// because up is always later and a plan is not an exception to that.
+    ///
+    /// **Simplification from Android's curtain.** Android opens this door by pulling
+    /// down at the top of the list, a custom `NestedScrollConnection` with three
+    /// detents (#175's `PlanningPull`). SwiftUI has no equivalent gesture primitive to
+    /// port faithfully, and the capability the issue actually asks for is "a way to add
+    /// a planned gig", not the drag itself — so this is a plain button that opens an
+    /// alert with a text field instead. Bills (the festival-lineup door) are not ported
+    /// either: the issue's four parts are setlist.fm-link, calendar, maps and time
+    /// state, and a Bill is a different record with no time-state question of its own.
     private var future: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("\u{2191}  THE FUTURE")
                 .font(.system(size: 11, weight: .semibold)).kerning(1.5)
                 .foregroundStyle(slate)
-            Text("the shows ahead")
-                .font(.system(size: 12)).foregroundStyle(faint)
+            HStack {
+                Text("the shows ahead")
+                    .font(.system(size: 12)).foregroundStyle(faint)
+                Spacer()
+                if model.state.planningLoading { ProgressView().tint(faint) }
+                Button { addingPlanned = true } label: {
+                    Image(systemName: "plus.circle").foregroundStyle(slate)
+                }
+                .accessibilityLabel("Add a gig you're going to")
+            }
+            ForEach(model.state.plannedGigs) { gig in
+                PlannedGigRow(setlist: gig)
+                    .contentShape(Rectangle())
+                    .onTapGesture { openGig(gig) }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.bottom, 18)
+        .alert("Add a gig you're going to", isPresented: $addingPlanned) {
+            TextField("setlist.fm link or id", text: $plannedLink)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Add") {
+                model.addPlannedGig(plannedLink)
+                plannedLink = ""
+            }
+            Button("Cancel", role: .cancel) { plannedLink = "" }
+        } message: {
+            Text("Paste the setlist.fm page for the show — its search can't find one that hasn't happened yet.")
+        }
     }
 
     private func openGig(_ show: FmSetlist) {
@@ -371,9 +432,11 @@ struct StationRow: View {
         switch row.node {
         case .festival(let name, let shows):
             VStack(alignment: .leading, spacing: 3) {
-                Text("FESTIVAL")
+                // Only a node with an identity says FESTIVAL. Without one it says
+                // ONE NIGHT or N NIGHTS — a smaller claim, and a true one.
+                Text(name != nil ? "FESTIVAL" : eveningKicker(shows))
                     .font(.system(size: 10, weight: .semibold)).kerning(1.5).foregroundStyle(slate)
-                Text(name).font(.system(size: 17, design: .serif)).foregroundStyle(ink)
+                Text(row.node.label).font(.system(size: 17, design: .serif)).foregroundStyle(ink)
                 Text(festivalDateRange(shows)).font(.system(size: 13)).foregroundStyle(muted)
                 festivalCounts(shows).font(.system(size: 12)).padding(.top, 4)
             }
@@ -418,6 +481,27 @@ struct StationRow: View {
                 + Text("\(theirCount) theirs").foregroundColor(laneColor(max(nodeHost(row, lanes), 0)))
         }
         return t
+    }
+}
+
+/// One night I hold a ticket for, above today (#175). Not woven into `rows` — it isn't
+/// an attended show and has no Lane/Crossing geometry of its own to draw — just the
+/// fact of the gig and `plannedStatus`'s answer to "how far off is it", the same words
+/// `gigStatus` gives an attended row once it has passed.
+private struct PlannedGigRow: View {
+    let setlist: FmSetlist
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(setlist.readableDate() ?? "Unknown date")
+                .font(.system(size: 11, weight: .semibold)).kerning(1).foregroundStyle(faint)
+            Text(setlist.artist?.name ?? "Unknown artist")
+                .font(.system(size: 15, design: .serif)).foregroundStyle(ink)
+            Text(setlist.venueLine()).font(.system(size: 13)).foregroundStyle(muted)
+            Text(plannedStatus(gigDate: setlist.eventDate, now: Date(), songCount: setlist.performed().count))
+                .font(.system(size: 12)).foregroundStyle(slate).padding(.top, 2)
+        }
+        .padding(.vertical, 8)
     }
 }
 
@@ -521,4 +605,33 @@ func festivalDateRange(_ shows: [FmSetlist]) -> String {
     guard let first = dates.first, let last = dates.last else { return "" }
     if first == last { return dayMonthYear.string(from: first) }
     return "\(dayMonth.string(from: first)) \u{2013} \(dayMonthYear.string(from: last))"
+}
+
+/// "Are you here?" — the one thing a check-in asks (#174). Shown only when a
+/// fix already put the phone at the venue on the night, so it states what it
+/// thinks and offers the two honest answers.
+private struct CheckInDialog: View {
+    let gig: FmSetlist
+    let onCheckIn: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Are you here?")
+                .font(.system(size: 19, design: .serif)).foregroundStyle(ink)
+            Text("\(gig.artist?.name ?? "This show") at \(gig.venue?.name ?? "the venue"), tonight.")
+                .font(.system(size: 13)).foregroundStyle(muted)
+            Text("Checking in records that you were at it — on this phone, nowhere else.")
+                .font(.system(size: 11)).foregroundStyle(faint)
+            Spacer(minLength: 12)
+            HStack {
+                Spacer()
+                Button("Not now") { onDismiss() }.foregroundStyle(faint)
+                Button("Check in") { onCheckIn() }.foregroundStyle(amber)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ground.ignoresSafeArea())
+    }
 }

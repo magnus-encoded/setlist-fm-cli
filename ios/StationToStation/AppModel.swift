@@ -56,6 +56,15 @@ struct UiState {
     var sharedWith: Friend?
     // My timeline (the Spine). Facts only — the shape is derived at render time.
     var timelineShows: [FmSetlist] = []
+    /// The future edge: gigs I hold a ticket for, furthest-future first (#175). Kept
+    /// apart from `timelineShows` the same way `showsByFriend` is — a plan is not an
+    /// attended show, and `gigTimeState` is what tells them apart on screen.
+    var plannedGigs: [FmSetlist] = []
+    /// The calendar event made for a planned gig, by gig id — EventKit's
+    /// `eventIdentifier`. Presence is what the leaf reads as "already added".
+    var calendarEventByGig: [String: String] = [:]
+    /// True while `addPlannedGig` is out fetching the setlist.fm record.
+    var planningLoading = false
     /// Friends' attended shows by setlist.fm username, drawn as Lanes when zoomed
     /// out. Kept apart from `timelineShows` (mine) so ownership is never read off
     /// the node holding a gig.
@@ -77,6 +86,33 @@ struct UiState {
     /// Asset ids the library holds from that night's window and this gig has not
     /// attached — the suggestion the grid offers before the picker is opened.
     var gigMediaSuggestions: [String] = []
+    /// The open **Gig**'s attendance claim (#174/#29) — whether, and how, I'm
+    /// known to have been there. Loaded alongside the gig's media so the header
+    /// badge has something to read.
+    var selectedAttendance: StoredAttendance?
+    /// A gig a location fix just placed me at, tonight — "Are you here?" (#174).
+    /// Nil until `offerCheckIn` finds one; presenting it is the whole of the ask.
+    var checkInOffer: FmSetlist?
+    // Cover art (#178): the gig's own attached photos first, then the same-night
+    // gallery match, offered as a playlist cover.
+    var coverCandidateIds: [String] = []
+    var coverLoading = false
+    var coverSearched = false
+    var coverPermissionGranted = false
+    /// nil means Spotify's own album-art collage.
+    var selectedCoverAssetId: String?
+    var coverUploadError: String?
+    /// The light switch (#180): my own Line, drawn as a Contact sees it. Global,
+    /// not persisted, not per-night — the same flag the timeline and the gig
+    /// screen both read, ported term for term from Android's `contactLight`.
+    var contactLight = false
+    /// Inside the light: also show what is being withheld, as placeholders never
+    /// re-rendering the actual content. Reset whenever the light is toggled, so
+    /// it always comes on faithful.
+    var showWithheld = false
+    /// The selected night's own **Log** (#169): what I saw, as opposed to what
+    /// setlist.fm publishes. Only the open **Gig**'s, same reasoning as `gigMedia`.
+    var gigLog = StoredLog()
     // Transient banners
     var error: String?
     var notice: String?
@@ -98,8 +134,11 @@ final class AppModel: ObservableObject {
     /// The shared half: the sequence and the rules, testable because the plumbing
     /// above is handed in rather than constructed inside it.
     private lazy var logic = TimelineLogic(plumbing: plumbing)
+    private lazy var location = DeviceLocation()
 
     private var matchTask: Task<Void, Never>?
+    /// One-shot per launch: dismissing an offer must not make it reappear (#174).
+    private var askedToCheckIn = false
 
     init() {
         state.setlistFmApiKey = settings.setlistFmApiKey ?? ""
@@ -122,6 +161,11 @@ final class AppModel: ObservableObject {
         if let fixture = UserDefaults.standard.string(forKey: "seedFixture")?.nilIfBlank {
             loadFixture(fixture, open: UserDefaults.standard.bool(forKey: "seedOpen"))
         }
+
+        // Refusing the location prompt is not a dead end and not an error: the
+        // ambient offer just never appears, and the gig's own screen still has
+        // a check-in you can press by hand.
+        location.onAuthorizationChanged = { [weak self] in self?.offerCheckIn() }
     }
 
     func consumeError() { state.error = nil }
@@ -143,6 +187,76 @@ final class AppModel: ObservableObject {
             await logic.loadSpine(me: me) { spine in
                 state.timelineShows = spine.mine
                 state.festivalNames = spine.festivalNames
+            }
+        }
+        loadPlannedGigs()
+    }
+
+    /// Furthest-future first — the same descending order the attended rows below
+    /// already use: up is always later, and a planned gig is not an exception to that.
+    private func sortedPlanned(_ gigs: [FmSetlist]) -> [FmSetlist] {
+        gigs.sorted { ($0.localDate() ?? .distantPast) > ($1.localDate() ?? .distantPast) }
+    }
+
+    /// The future edge, from disk (#175). Called alongside the Spine at launch, and
+    /// again by every write below so the timeline never shows stale plans.
+    func loadPlannedGigs() {
+        Task {
+            let cache = await timelines.load()
+            state.plannedGigs = sortedPlanned(cache.planned())
+            state.calendarEventByGig = cache.calendarEvents()
+        }
+    }
+
+    /// Adds a gig I'm going to, from whatever was pasted off setlist.fm — the page url
+    /// or the bare id.
+    ///
+    /// Fetched by id, never searched: setlist.fm's search index stops about a day out
+    /// (#29), so a show weeks away cannot be found by artist, venue or date — only
+    /// asked for by the id sitting in the url of the page the user was on.
+    func addPlannedGig(_ linkOrId: String) {
+        guard let id = parseSetlistId(linkOrId) else {
+            state.error = "That doesn't look like a setlist.fm gig link."
+            return
+        }
+        if state.plannedGigs.contains(where: { $0.id == id }) { return }
+        state.planningLoading = true
+        Task {
+            do {
+                let gig = try await setlistFm.setlist(id)
+                await timelines.savePlanned(gig)
+                state.plannedGigs = sortedPlanned(state.plannedGigs.filter { $0.id != gig.id } + [gig])
+                state.planningLoading = false
+            } catch {
+                state.planningLoading = false
+                fail(error)
+            }
+        }
+    }
+
+    /// Forgets a gig I'm not going to after all.
+    func removePlannedGig(_ gigId: String) {
+        state.plannedGigs = state.plannedGigs.filter { $0.id != gigId }
+        Task { await timelines.removePlanned(setlistId: gigId) }
+    }
+
+    /// A calendar event was just made for a planned gig; remember its identifier.
+    /// Presence of it is what a leaf reads as "already added" (#175).
+    func markCalendarAdded(_ gigId: String, eventId: String) {
+        state.calendarEventByGig[gigId] = eventId
+        Task { await timelines.markCalendarAdded(gigId: gigId, eventId: eventId) }
+    }
+
+    /// Bridges the pure `insertCalendarEvent` to state a view can render: EventKit
+    /// itself asks nothing of the model layer, but the result — the id, or the lack of
+    /// one — has to land somewhere the leaf reads. Degrades to the same error banner
+    /// every other failure in this model uses, matching Android's toast.
+    func addToCalendar(_ setlist: FmSetlist) {
+        Task {
+            if let id = await insertCalendarEvent(setlist) {
+                markCalendarAdded(setlist.id, eventId: id)
+            } else {
+                state.error = "Couldn't add this to your calendar."
             }
         }
     }
@@ -190,6 +304,17 @@ final class AppModel: ObservableObject {
     func setZoomedOut(_ v: Bool) {
         if v && state.friends.isEmpty { return }
         state.zoomedOut = v
+    }
+
+    /// Flip the light switch: my own Line, as a Contact sees it. Always comes on
+    /// faithful — withheld items stay hidden until asked for again.
+    func toggleContactLight() {
+        state.contactLight.toggle()
+        state.showWithheld = false
+    }
+
+    func setShowWithheld(_ v: Bool) {
+        state.showWithheld = v
     }
 
     /// Fetches whichever Followed Lanes are stale (missing, empty, or not back
@@ -367,6 +492,9 @@ final class AppModel: ObservableObject {
         Task {
             guard let fetched = try? await setlistFm.setlist(id) else { return }
             await timelines.savePlanned(fetched)
+            // Keeps the future edge in step with what was just written — without this
+            // an invited-in gig would not appear above tonight until the next launch.
+            state.plannedGigs = sortedPlanned(state.plannedGigs.filter { $0.id != fetched.id } + [fetched])
             state.selectedSetlist = fetched
             loadGigMedia(fetched)
             onOpen()
@@ -553,10 +681,21 @@ final class AppModel: ObservableObject {
 
         state.selectedSetlist = setlist
         loadGigMedia(setlist)
+        state.gigLog = StoredLog()
+        Task {
+            let log = await timelines.log(setlistId: setlist.id)
+            guard state.selectedSetlist?.id == setlist.id else { return }
+            state.gigLog = log
+        }
         state.matches = matches
         state.matching = true
         state.playlistName = defaultName
         state.createdPlaylistUrl = nil
+        state.coverCandidateIds = []
+        state.selectedCoverAssetId = nil
+        state.coverSearched = false
+        state.coverUploadError = nil
+        loadCoverCandidates(setlist)
 
         matchTask = Task {
             for (index, match) in matches.enumerated() {
@@ -583,11 +722,97 @@ final class AppModel: ObservableObject {
     private func loadGigMedia(_ setlist: FmSetlist) {
         state.gigMedia = []
         state.gigMediaSuggestions = []
+        state.selectedAttendance = nil
         Task {
-            let stored = await timelines.load().media()[setlist.id] ?? []
+            let cache = await timelines.load()
             guard state.selectedSetlist?.id == setlist.id else { return }
-            state.gigMedia = stored
+            state.gigMedia = cache.media()[setlist.id] ?? []
+            state.selectedAttendance = cache.attendance()[setlist.id]
             refreshSuggestions(setlist)
+        }
+    }
+
+    // --- Check-in (#174) ---
+
+    /// True if any gig I know about could be checked into right now on the
+    /// calendar alone. Cheap and pure — it is what decides whether asking for
+    /// the location permission is warranted at all, so the prompt only ever
+    /// appears on a night there is actually something to check into.
+    func checkInDue(now: Date = Date()) async -> Bool {
+        let cache = await timelines.load()
+        let attendance = cache.attendance()
+        return cache.planned().contains { gig in
+            canCheckInManually(gig: gig, now: now) && attendance[gig.id]?.provenance != "checked_in"
+        }
+    }
+
+    func hasLocationPermission() -> Bool { location.hasPermission }
+
+    func requestLocationPermission() { location.requestPermission() }
+
+    /// One fix, once, when the timeline is opened: if it puts me at a gig I'm
+    /// going to tonight, offer to check in. Every failure along the way —
+    /// permission refused, no fix, no coordinates for the venue, too far away —
+    /// is silently no offer. Nothing here is retried, scheduled or run in the
+    /// background.
+    ///
+    /// ponytail: linear over the planned gigs, geocoding only the one that
+    /// passes the city gate. You have a ticket for a handful of nights, not
+    /// thousands.
+    func offerCheckIn() {
+        if askedToCheckIn { return }
+        askedToCheckIn = true
+        Task {
+            guard let fix = await location.currentFix() else { return }
+            let cache = await timelines.load()
+            let attendance = cache.attendance()
+            let candidates = cache.planned().filter { attendance[$0.id]?.provenance != "checked_in" }
+            guard let gig = checkInCandidate(gigs: candidates, now: Date(), where: fix) else { return }
+            guard let venue = await venueCoords(gig, cache: cache) else { return }
+            guard atVenue(where: fix, venue: venue) else { return }
+            state.checkInOffer = gig
+        }
+    }
+
+    func dismissCheckInOffer() { state.checkInOffer = nil }
+
+    /// The venue's coordinates, geocoded once and kept on the attendance record
+    /// — the same fields #29/#174 reserved for it on Android. Nil for a venue
+    /// the geocoder can't place, which costs this gig its prompt and nothing else.
+    private func venueCoords(_ gig: FmSetlist, cache: TimelineCache) async -> (lat: Double, lon: Double)? {
+        if let stored = cache.attendance()[gig.id], let lat = stored.venueLat, let lon = stored.venueLon {
+            return (lat, lon)
+        }
+        guard let query = venueMapsQuery(venueName: gig.venue?.name, city: gig.venue?.city?.name)
+        else { return nil }
+        guard let found = await location.geocodeVenue(
+            [query, gig.venue?.city?.country?.name].compactMap { $0 }.joined(separator: ", ")
+        ) else { return nil }
+        await timelines.saveAttendance(
+            setlistId: gig.id,
+            attendance: StoredAttendance(
+                provenance: cache.attendance()[gig.id]?.provenance ?? "planned",
+                checkedInAt: cache.attendance()[gig.id]?.checkedInAt,
+                venueLat: found.lat, venueLon: found.lon
+            )
+        )
+        return found
+    }
+
+    /// I am here. Sets the provenance the whole issue exists for, with the
+    /// moment it happened — evidence of a different strength than setlist.fm's
+    /// retroactive flag, not a competing record.
+    func checkIn(_ gigId: String) {
+        state.checkInOffer = nil
+        Task {
+            let existing = await timelines.load().attendance()[gigId]
+            let attendance = StoredAttendance(
+                provenance: "checked_in",
+                checkedInAt: Int64(Date().timeIntervalSince1970 * 1000),
+                venueLat: existing?.venueLat, venueLon: existing?.venueLon
+            )
+            await timelines.saveAttendance(setlistId: gigId, attendance: attendance)
+            if state.selectedSetlist?.id == gigId { state.selectedAttendance = attendance }
         }
     }
 
@@ -610,15 +835,27 @@ final class AppModel: ObservableObject {
     /// tiers written before the record exists. Anything whose bytes could not be
     /// read is *not* attached and says so — a record with nothing behind it is the
     /// failure #98 exists to prevent.
-    func attachMedia(assetIds: [String]) {
+    ///
+    /// **Attach asks once** (#171, porting Android's `AttachHandle`): `band` is
+    /// the answer to "shared or vault", named by whichever control the gesture
+    /// landed on. There is no default path into this — every caller names one.
+    func attachMedia(assetIds: [String], to band: Band = .shared) {
         guard let setlist = state.selectedSetlist else { return }
         let had = state.gigMedia
         let wanted = assetIds.filter { id in !had.contains { $0.ref == id } }
         guard !wanted.isEmpty else { return }
         Task {
-            let (fresh, failed) = await PhotoLibrary.attach(assetIds: wanted)
-            if !fresh.isEmpty {
-                let media = had + fresh
+            let (fetched, failed) = await PhotoLibrary.attach(assetIds: wanted)
+            if !fetched.isEmpty {
+                let fresh = fetched.map { item -> StoredMedia in
+                    var m = item
+                    m.personal = (band == .vault)
+                    return m
+                }
+                // Normalised through the bands so a fresh item lands at the end of
+                // its own run rather than after somebody else's media.
+                let split = bandsOf(had + fresh)
+                let media = split.shared + split.received + split.vault
                 state.gigMedia = media
                 await timelines.saveMedia(setlistId: setlist.id, media: media)
                 refreshSuggestions(setlist)
@@ -629,6 +866,22 @@ final class AppModel: ObservableObject {
                     : "Couldn't read \(failed) of those — not attached."
             }
         }
+    }
+
+    /// Moves one of my items into `band`, at the end of its run — the drag
+    /// between bands, and what letting go of it there means (#171, porting
+    /// Android's `moveGigMedia`).
+    ///
+    /// A move between bands *is* the change to its **Personal** bit; there is no
+    /// separate gesture and no night-level grant above it. **Received media** is
+    /// refused by `moveMedia` rather than here: whose disposition it is belongs
+    /// with the rule, not with the caller.
+    func moveMedia(_ mediaId: String, to band: Band) {
+        guard let setlist = state.selectedSetlist else { return }
+        let target = band == .shared ? bandsOf(state.gigMedia).shared.count : bandsOf(state.gigMedia).vault.count
+        let media = StationToStation.moveMedia(state.gigMedia, id: mediaId, to: band, index: target)
+        state.gigMedia = media
+        Task { await timelines.saveMedia(setlistId: setlist.id, media: media) }
     }
 
     /// Removing means removing: the record goes, and so do the bytes it owned.
@@ -643,13 +896,174 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Write, edit or clear my Note in one Band (#50, porting Android's
+    /// `setGigNote`).
+    ///
+    /// At most one of mine per band, so this is an upsert keyed by band rather
+    /// than by id: the write-line the finger landed on already said which one
+    /// it means. Two notes in a band would need arranging, arranging would
+    /// need the handle, and the thing being served is one opinion about one
+    /// night.
+    ///
+    /// Emptying it removes it. A note with nothing in it is not something
+    /// anyone wrote, and leaving an empty record behind would make the shared
+    /// band claim a contributor who said nothing — which would turn a night
+    /// green over blank text.
+    func setGigNote(_ band: Band, text: String) {
+        guard let setlist = state.selectedSetlist else { return }
+        let had = state.gigMedia
+        let personal = band == .vault
+        let mine = had.first { $0.kind == StoredMedia.Kind.note && $0.from == nil && $0.personal == personal }
+        let written = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let media: [StoredMedia]
+        if let mine, written.isEmpty {
+            media = had.filter { $0.id != mine.id }
+        } else if let mine {
+            media = had.map { item in
+                guard item.id == mine.id else { return item }
+                var m = item
+                m.text = written
+                return m
+            }
+        } else if written.isEmpty {
+            media = had
+        } else {
+            media = had + [StoredMedia(
+                id: UUID().uuidString.lowercased(),
+                kind: StoredMedia.Kind.note,
+                // When it was written. It is what sorts received notes, and a
+                // note has no camera to ask for anything better.
+                capturedAt: Int64(Date().timeIntervalSince1970 * 1000),
+                personal: personal,
+                text: written
+            )]
+        }
+        state.gigMedia = media
+        Task { await timelines.saveMedia(setlistId: setlist.id, media: media) }
+    }
+
+    /// Set or unset the Verdict on one of my Notes (porting Android's
+    /// `setGigVerdict`).
+    ///
+    /// Tapping the one already set passes nil, because unset has to stay
+    /// reachable — it is a real state, and a night I have stopped having an
+    /// opinion about must not be stuck wearing the one I had.
+    func setGigVerdict(_ noteId: String, verdict: String?) {
+        guard let setlist = state.selectedSetlist else { return }
+        let had = state.gigMedia
+        // Mine only. A received note's verdict is its sender's statement and
+        // is not mine to edit, the same way their photograph is not mine to
+        // reposition.
+        guard had.contains(where: { $0.id == noteId && $0.from == nil }) else { return }
+        let media = had.map { item -> StoredMedia in
+            guard item.id == noteId else { return item }
+            var m = item
+            m.verdict = verdict
+            return m
+        }
+        state.gigMedia = media
+        Task { await timelines.saveMedia(setlistId: setlist.id, media: media) }
+    }
+
+    // --- Cover art (#178) ---
+
+    /// Offers the gig's own keepsakes first — already chosen for this night, so
+    /// they need no permission and no re-asking — then the gallery's same-night
+    /// match once that permission is granted. The gallery half is silent when
+    /// missing: the confirm screen asks for it instead, so a prompt only ever
+    /// follows a tap.
+    private func loadCoverCandidates(_ setlist: FmSetlist) {
+        guard let date = setlist.eventDate, let window = photoWindow(gigDate: date) else { return }
+        let granted = PhotoLibrary.isAuthorized
+        state.coverPermissionGranted = granted
+        state.coverLoading = true
+        Task {
+            let pinned = state.gigMedia.filter { $0.kind == StoredMedia.Kind.photo }.map(\.ref)
+            let gallery = granted ? await Task.detached { PhotoLibrary.assetsFromNight(window) }.value : []
+            var seen = Set<String>()
+            let candidates = (pinned + gallery).filter { seen.insert($0).inserted }
+            guard state.selectedSetlist?.id == setlist.id else { return }
+            state.coverCandidateIds = candidates
+            state.coverLoading = false
+            state.coverSearched = true
+            // The first photo is the suggestion, so it is the cover until the
+            // picker is swiped somewhere else.
+            state.selectedCoverAssetId = candidates.first
+        }
+    }
+
+    /// The cover the picker has landed on, or nil for Spotify's own collage.
+    func setCover(_ assetId: String?) {
+        if state.selectedCoverAssetId != assetId { state.selectedCoverAssetId = assetId }
+    }
+
+    /// Re-runs the cover search after the gallery permission prompt the picker
+    /// itself triggered — the rest of the confirm screen (matches, playlist name)
+    /// is untouched.
+    func refreshCoverCandidates() {
+        guard let setlist = state.selectedSetlist else { return }
+        loadCoverCandidates(setlist)
+    }
+
+    /// Returns nil on success, or the reason the cover did not make it.
+    private func uploadCover(playlistId: String, assetId: String) async -> String? {
+        guard spotify.hasImageUploadScope() else {
+            return "The cover needs a permission your Spotify login predates. "
+                + "Log out in Settings and log in again to enable playlist covers."
+        }
+        guard let jpeg = await PhotoLibrary.coverJpeg(assetId: assetId) else {
+            return "That photo could not be prepared as a cover."
+        }
+        do {
+            try await spotify.uploadCover(playlistId, jpeg: jpeg)
+            return nil
+        } catch {
+            return "The cover could not be uploaded. \(userMessage(error))"
+        }
+    }
+
+    // --- The Log: what I saw, as opposed to what setlist.fm publishes (#169) ---
+
+    /// Asserted, never derived: a song I *think* they played never becomes a song
+    /// they played by inaction, so this is a tap, not a diff against a candidate
+    /// pool. Editing songs never touches `closed` — "that was the whole set" is a
+    /// separate, deliberate sentence.
+    func addToLog(_ song: String) { writeLog { $0.adding(song) } }
+
+    func removeFromLog(_ index: Int) { writeLog { $0.removingAt(index) } }
+
+    /// A title replaces entry `index`, and what was written moves beneath it (#126).
+    func correctLogEntry(_ index: Int, title: String) { writeLog { $0.correctingAt(index, title: title) } }
+
+    /// The way back. A wrong correction must not be a one-way door.
+    func restoreLogEntry(_ index: Int) { writeLog { $0.restoringAt(index) } }
+
+    /// The only thing that may **Close** a **Log**, and it is a person saying so.
+    /// setlist.fm has nowhere to keep this bit, so it never leaves the device.
+    func setLogClosed(_ closed: Bool) {
+        writeLog {
+            var log = $0
+            log.closed = closed
+            return log
+        }
+    }
+
+    private func writeLog(_ edit: (StoredLog) -> StoredLog) {
+        guard let setlist = state.selectedSetlist else { return }
+        let updated = edit(state.gigLog)
+        state.gigLog = updated
+        Task { await timelines.saveLog(setlistId: setlist.id, log: updated) }
+    }
+
     private func findCandidates(_ track: String, _ artist: String) async -> ([SpotifyTrack], String?) {
         do {
-            var results = try await spotify.searchTracks("track:\"\(track)\" artist:\"\(artist)\"")
+            var results = try await spotify.searchTracks("track:\"\(track)\" artist:\"\(artist)\"", limit: 10)
             if results.isEmpty {
-                results = try await spotify.searchTracks("\(track) \(artist)")
+                results = try await spotify.searchTracks("\(track) \(artist)", limit: 10)
             }
-            return (results, nil)
+            // Best-first rather than Spotify-first: the auto-selection below takes
+            // the head of this list, and the picker lists them in this order too.
+            return (rankCandidates(results, track, artist), nil)
         } catch {
             return ([], userMessage(error))
         }
@@ -674,11 +1088,19 @@ final class AppModel: ObservableObject {
 
     /// Manual re-search for one song with a user-provided query.
     func researchSong(_ index: Int, _ query: String) {
-        if query.trimmingCharacters(in: .whitespaces).isEmpty { return }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return }
         updateMatch(index) { $0.loading = true; $0.error = nil }
         Task {
             do {
-                let results = try await spotify.searchTracks(query.trimmingCharacters(in: .whitespaces), limit: 10)
+                let found = try await spotify.searchTracks(trimmed, limit: 10)
+                // Ranked like the automatic search, or searching by hand would be
+                // the one path that still hands you Spotify's karaoke rendition.
+                // The query is the user's, but which recording we mean is still
+                // this song by this artist.
+                let songName = state.matches.indices.contains(index) ? state.matches[index].song.name : trimmed
+                let artist = state.matches.indices.contains(index) ? state.matches[index].searchArtist : ""
+                let results = rankCandidates(found, songName, artist)
                 updateMatch(index) {
                     $0.loading = false
                     $0.candidates = results
@@ -729,11 +1151,20 @@ final class AppModel: ObservableObject {
                     // leaving the user with a bare failure and a stray playlist.
                     throw AppError("Playlist \"\(name)\" was created but the songs could not be added. \(userMessage(error))")
                 }
+                // The songs are the point, so a cover that will not upload is
+                // reported next to the success rather than thrown over it.
+                let coverError: String?
+                if let assetId = s.selectedCoverAssetId {
+                    coverError = await uploadCover(playlistId: playlist.id, assetId: assetId)
+                } else {
+                    coverError = nil
+                }
                 state.creatingPlaylist = false
                 state.createdPlaylistUrl = playlist.externalUrls["spotify"]
                 state.createdPlaylistName = name
                 state.createdTrackCount = result.added
                 state.createdRefusedCount = result.refused.count
+                state.coverUploadError = coverError
             } catch {
                 fail(error)
             }
