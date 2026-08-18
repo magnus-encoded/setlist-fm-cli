@@ -681,7 +681,12 @@ final class AppModel: ObservableObject {
 
         state.selectedSetlist = setlist
         loadGigMedia(setlist)
-        state.gigLog = timelines.log(setlistId: setlist.id)
+        state.gigLog = StoredLog()
+        Task {
+            let log = await timelines.log(setlistId: setlist.id)
+            guard state.selectedSetlist?.id == setlist.id else { return }
+            state.gigLog = log
+        }
         state.matches = matches
         state.matching = true
         state.playlistName = defaultName
@@ -914,7 +919,12 @@ final class AppModel: ObservableObject {
         if let mine, written.isEmpty {
             media = had.filter { $0.id != mine.id }
         } else if let mine {
-            media = had.map { $0.id == mine.id ? { var m = $0; m.text = written; return m }() : $0 }
+            media = had.map { item in
+                guard item.id == mine.id else { return item }
+                var m = item
+                m.text = written
+                return m
+            }
         } else if written.isEmpty {
             media = had
         } else {
@@ -945,7 +955,12 @@ final class AppModel: ObservableObject {
         // is not mine to edit, the same way their photograph is not mine to
         // reposition.
         guard had.contains(where: { $0.id == noteId && $0.from == nil }) else { return }
-        let media = had.map { $0.id == noteId ? { var m = $0; m.verdict = verdict; return m }() : $0 }
+        let media = had.map { item -> StoredMedia in
+            guard item.id == noteId else { return item }
+            var m = item
+            m.verdict = verdict
+            return m
+        }
         state.gigMedia = media
         Task { await timelines.saveMedia(setlistId: setlist.id, media: media) }
     }
@@ -1037,7 +1052,7 @@ final class AppModel: ObservableObject {
         guard let setlist = state.selectedSetlist else { return }
         let updated = edit(state.gigLog)
         state.gigLog = updated
-        timelines.saveLog(setlistId: setlist.id, log: updated)
+        Task { await timelines.saveLog(setlistId: setlist.id, log: updated) }
     }
 
     private func findCandidates(_ track: String, _ artist: String) async -> ([SpotifyTrack], String?) {
