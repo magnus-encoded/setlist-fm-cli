@@ -204,12 +204,21 @@ func writeEndOfItems(_ wire: ContactConnection) async throws {
     try await wire.writeFrame(endOfItems)
 }
 
-/// Nil once the end-of-items marker arrives: the sender is genuinely done. A dropped
-/// connection surfaces as a thrown error instead — a different outcome on purpose.
+/// Nil once the end-of-items marker arrives — **and only then**: the sender is genuinely
+/// done. A dropped connection surfaces as a thrown error instead, and so does a header
+/// that will not decode, which Android's `readItemHeader` also treats as fatal.
+///
+/// The distinction is the whole point of the signature. A header that failed to parse is
+/// followed on the wire by a body nobody is going to read; returning nil for it would end
+/// the loop with those bytes still queued, and every frame read after that would be
+/// somebody's photograph interpreted as a length.
 func readItemHeader(_ wire: ContactConnection) async throws -> ItemHeader? {
     guard let frame = try await wire.readFrame() else { throw ContactWireError.closedMidFrame }
     if frame.isEmpty { return nil }
-    return try? wireDecoder.decode(ItemHeader.self, from: frame)
+    guard let header = try? wireDecoder.decode(ItemHeader.self, from: frame) else {
+        throw ContactWireError.refusedFrame
+    }
+    return header
 }
 
 func writeJson<T: Encodable>(_ wire: ContactConnection, _ value: T) async throws {

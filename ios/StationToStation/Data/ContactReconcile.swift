@@ -17,8 +17,33 @@ struct ContactReconcilePlan: Equatable {
     /// Media id → the reference to my own copy, matched by hash. No bytes cross the
     /// wire for these.
     var fromGallery: [String: String] = [:]
+    /// Media ids that are already complete: a **Note** is text and a **Verdict**, and both
+    /// rode the manifest. There is nothing to fetch, so asking for them would be asking
+    /// for zero bytes and then dropping the note when zero bytes arrived.
+    var noBytes: [String] = []
     /// Media ids to ask for.
     var request: [String] = []
+}
+
+/// Whether a media id from a peer is safe to use as an identity and, downstream, as a
+/// **filename**.
+///
+/// A media id is a UUID this app minted at **Attach** (#97) — but an id arriving over the
+/// wire is whatever the far end chose to send, and it reaches `Thumbnails.gridFile` and
+/// the received-media directory as a path component. `URL.appendingPathComponent` does not
+/// escape a `/`, so an id of `../../…` would write outside the directory it was meant for
+/// and could overwrite an existing keepsake's thumbnail.
+///
+/// Checked here rather than at each of those call sites: this is the one door every
+/// peer-supplied id comes through, and a check that has to be remembered three times is a
+/// check that will be forgotten once. An allow-list, for the reason
+/// `isPlausibleSetlistFmUser` is one — the interesting characters are the ones nobody
+/// thought of.
+func isSafeMediaId(_ id: String) -> Bool {
+    guard !id.isEmpty, id.count <= 64 else { return false }
+    return id.unicodeScalars.allSatisfy {
+        CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_"
+    }
 }
 
 /// The LAN reconcile decision. Pure: no radio, no socket, no clock — the same split
@@ -50,8 +75,12 @@ func contactReconcilePlan(
 
     var plan = ContactReconcilePlan()
     for item in offer.media {
-        if mineIds.contains(item.id) {
+        if !isSafeMediaId(item.id) {
+            continue
+        } else if mineIds.contains(item.id) {
             plan.held.append(item.id)
+        } else if item.kind == StoredMedia.Kind.note {
+            plan.noBytes.append(item.id)
         } else if let ref = byHash[item.hash] {
             plan.fromGallery[item.id] = ref
         } else {
@@ -63,8 +92,9 @@ func contactReconcilePlan(
 
 /// The dumb half of `contactReconcilePlan`: turns resolved items into what
 /// `TimelineStore.mergeContactMedia` should write. `resolved` is media id → my own local
-/// ref — the plan's `fromGallery` entries as soon as the plan exists, its `request`
-/// entries once their bytes have actually arrived over the wire.
+/// ref — the plan's `fromGallery` and `noBytes` entries as soon as the plan exists, its
+/// `request` entries once their bytes have actually arrived over the wire. A **Note**'s
+/// ref is the empty string, which is what a note's ref is everywhere else too.
 ///
 /// A received item only lands on a night I already have, matched by `setlistId` — the one
 /// key that means the same thing on two people's timelines (#28). This never mints a new
@@ -88,7 +118,10 @@ func contactLanding(
               let myGigId = setlistToGigId[setlistId]
         else { continue }
         let landed: [StoredMedia] = items.compactMap { item in
-            guard let ref = resolved[item.id] else { return nil }
+            // Checked again here rather than trusted from the plan: these items come from
+            // `offer.timeline.gigMedia`, which is a different part of the peer's message
+            // than `offer.media` and could disagree with it.
+            guard isSafeMediaId(item.id), let ref = resolved[item.id] else { return nil }
             var copy = item
             copy.ref = ref
             copy.from = attribution[item.id] ?? item.from

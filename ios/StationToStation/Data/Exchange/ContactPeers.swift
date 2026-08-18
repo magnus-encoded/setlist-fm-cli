@@ -20,8 +20,14 @@ final class ContactPeers {
     /// how two apps in the same room stop finding each other.
     static let serviceType = "_stationtostation._tcp"
 
-    /// Every endpoint seen answering, once each. Called on `queue`.
-    var onEndpoint: ((NWEndpoint) -> Void)?
+    /// Every endpoint seen answering, once each. Called on `queue` — and *set* on it too,
+    /// via `deliverTo`: the browse handler reads this from `queue` while the screen sets it
+    /// from the main actor, which is a data race however harmless the assignment looks.
+    private var onEndpoint: ((NWEndpoint) -> Void)?
+
+    func deliverTo(_ handler: ((NWEndpoint) -> Void)?) {
+        queue.async { self.onEndpoint = handler }
+    }
 
     private let queue = DispatchQueue(label: "io.github.magnusencoded.stationtostation.peers")
     private var browser: NWBrowser?

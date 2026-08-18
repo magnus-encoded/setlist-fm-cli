@@ -399,10 +399,6 @@ struct TimelineCache: Codable {
     }
 }
 
-/// An actor, which is the whole of the locking story: `save` is read-modify-write
-/// and several call sites fire independently (my import, the friend lanes, the
-/// festival names). Without serialization two overlapping saves both read the old
-/// cache and the loser's writes vanish.
 /// Both nights' media, the one already here winning any id that appears twice. The twin
 /// of Android's `unionMedia`, and the reason a reconcile can simply re-run: an item that
 /// arrives again is the copy already held, not a second of it.
@@ -410,6 +406,10 @@ func unionMedia(_ kept: [StoredMedia], _ arriving: [StoredMedia]) -> [StoredMedi
     kept + arriving.filter { item in !kept.contains { $0.id == item.id } }
 }
 
+/// An actor, which is the whole of the locking story: `save` is read-modify-write
+/// and several call sites fire independently (my import, the friend lanes, the
+/// festival names). Without serialization two overlapping saves both read the old
+/// cache and the loser's writes vanish.
 actor TimelineStore {
 
     private let file: URL

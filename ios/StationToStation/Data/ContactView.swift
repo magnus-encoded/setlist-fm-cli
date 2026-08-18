@@ -59,8 +59,24 @@ func contactMedia(_ media: [String: [StoredMedia]]) -> [String: [StoredMedia]] {
 /// nobody can assert against.
 func contactManifest(_ cache: TimelineCache, me: String) -> HandoverManifest {
     let shared = cache.gigMedia.mapValues(visibleToContacts).filter { !$0.value.isEmpty }
-    var timeline = cache
+
+    // **Built up from empty, never handed a copy of the cache to subtract from.** A
+    // `TimelineCache` also holds my **Log**, my attendance and how it was decided, the
+    // gigs I have tickets for, the playlists I made, every band's shows and my totals —
+    // and a Contact is offered *media from a shared night*, which is the whole of #265's
+    // ninth story. Sending the rest because it happened to be in the same struct is the
+    // failure that story names.
+    //
+    // Two fields, because `contactLanding` reads exactly two: `gigMedia` for what is
+    // offered and `gigs` for the `setlistId` that says which night it was. Anything added
+    // here later should have to answer for itself.
+    //
+    // The nights are narrowed too, not just the media on them: the full `gigs` map is the
+    // complete list of every gig I have ever attended, which is a different disclosure
+    // than the one being made.
+    var timeline = TimelineCache()
     timeline.gigMedia = shared
+    timeline.gigs = cache.gigs.filter { shared[$0.key] != nil }
 
     let media = shared.keys.sorted().flatMap { gigId in
         shared[gigId, default: []].map { item in

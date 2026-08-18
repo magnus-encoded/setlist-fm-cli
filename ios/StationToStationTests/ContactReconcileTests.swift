@@ -89,6 +89,73 @@ final class ContactReconcileTests: XCTestCase {
         XCTAssertEqual(["m1"], plan.request)
     }
 
+    /// A **Note** is text and a **Verdict**, and both already rode the manifest. Asking
+    /// for it would be asking for zero bytes — and then dropping it when zero bytes
+    /// arrived, which is exactly what used to happen.
+    func testANoteNeedsNothingFetchedAndIsNeverRequested() {
+        let note = OfferedMedia(id: "n1", gigId: "a", kind: StoredMedia.Kind.note,
+                                hash: "", from: "their-key", text: "the encore was the point")
+        let offer = manifest(media: [note, offered("m1", hash: "h1")])
+
+        let plan = contactReconcilePlan(mine: TimelineCache(), offer: offer, verified: true)
+
+        XCTAssertEqual(["n1"], plan.noBytes)
+        XCTAssertEqual(["m1"], plan.request)
+    }
+
+    /// A note I already hold is still held: `noBytes` is "nothing to fetch", not "always
+    /// take it again".
+    func testANoteAlreadyHeldStaysHeld() {
+        var note = photo("n1")
+        note.kind = StoredMedia.Kind.note
+        let mine = cache(gigMedia: ["a": [note]])
+        let offer = manifest(media: [OfferedMedia(id: "n1", gigId: "a",
+                                                  kind: StoredMedia.Kind.note, from: "their-key")])
+
+        let plan = contactReconcilePlan(mine: mine, offer: offer, verified: true)
+
+        XCTAssertEqual(["n1"], plan.held)
+        XCTAssertTrue(plan.noBytes.isEmpty)
+    }
+
+    /// A media id becomes a filename downstream (`Thumbnails.gridFile`, the received-media
+    /// directory) and `appendingPathComponent` does not escape a separator. An id from a
+    /// peer is whatever they chose to send, so it never reaches a path at all.
+    func testAnIdThatWouldEscapeItsDirectoryIsIgnoredEntirely() {
+        let offer = manifest(media: [
+            offered("../../../../Library/Preferences/stolen", hash: "h1"),
+            offered("m1/../m2", hash: "h1"),
+            offered("", hash: "h1"),
+            offered(String(repeating: "x", count: 65), hash: "h1"),
+            offered("A-perfectly-ordinary_UUID-0001", hash: "h1"),
+        ])
+        let gallery = [GalleryItem(ref: "asset/gallery/x", hash: "h1")]
+
+        let plan = contactReconcilePlan(mine: TimelineCache(), offer: offer,
+                                        verified: true, gallery: gallery)
+
+        XCTAssertEqual(["A-perfectly-ordinary_UUID-0001": "asset/gallery/x"], plan.fromGallery)
+        XCTAssertTrue(plan.request.isEmpty)
+        XCTAssertTrue(plan.held.isEmpty)
+    }
+
+    /// Checked at the landing too, and not only in the plan: `offer.media` and
+    /// `offer.timeline.gigMedia` are different parts of a peer's message and nothing makes
+    /// them agree.
+    func testAnUnsafeIdIsRejectedAtTheLandingAsWell() {
+        let mine = cache(gigs: ["mine-gig": StoredGig(id: "mine-gig", setlistId: "sl-1")])
+        let offer = manifest(
+            timeline: cache(gigs: ["their-gig": StoredGig(id: "their-gig", setlistId: "sl-1")],
+                            gigMedia: ["their-gig": [photo("../escape")]]),
+            media: []
+        )
+
+        let landing = contactLanding(mine: mine, offer: offer,
+                                     resolved: ["../escape": "asset/gallery/x"])
+
+        XCTAssertTrue(landing.isEmpty)
+    }
+
     /// What lets an Exchange visit re-diff on every discovery instead of tracking any
     /// session state of its own: walking in and out of range twice is the same plan
     /// twice, not two half-plans.
@@ -197,6 +264,29 @@ final class ContactReconcileTests: XCTestCase {
         XCTAssertEqual([false], offered.media.map(\.personal))
         // In the source's own gig ids: translating them is the receiver's job.
         XCTAssertEqual(["a"], offered.media.map(\.gigId))
+    }
+
+    /// #265's ninth story, asserted: *media from the shared band, not my whole timeline*.
+    /// A `TimelineCache` carries the **Log**, attendance and how it was decided, tickets
+    /// held, playlists made and every band's shows — and it is one struct, so the leak is
+    /// a field nobody removed rather than a decision anybody made.
+    func testAManifestCarriesTheSharedNightsAndNothingElseFromMyTimeline() {
+        var mine = cache(gigs: ["shared": StoredGig(id: "shared", setlistId: "sl-1"),
+                                "private": StoredGig(id: "private", setlistId: "sl-2")],
+                         gigMedia: ["shared": [photo("m1")]])
+        mine.shows = ["me": [FmSetlist(id: "sl-9")]]
+        mine.attendedTotals = ["me": 412]
+        mine.gigPlanned = ["planned": FmSetlist(id: "sl-3")]
+
+        let offered = contactManifest(mine, me: "my-key")
+
+        XCTAssertTrue(offered.timeline.shows.isEmpty)
+        XCTAssertTrue(offered.timeline.attendedTotals.isEmpty)
+        XCTAssertTrue(offered.timeline.gigPlanned.isEmpty)
+        // The two fields `contactLanding` actually reads, and a night with nothing to
+        // offer is not one whose existence travels either.
+        XCTAssertEqual(["shared"], Array(offered.timeline.gigs.keys))
+        XCTAssertEqual(["shared"], Array(offered.timeline.gigMedia.keys))
     }
 
     /// A night that shares nothing drops out of the manifest rather than travelling as an

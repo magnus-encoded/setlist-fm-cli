@@ -56,7 +56,12 @@ final class ContactExchange {
     private let peers = ContactPeers()
     private var listener: NWListener?
     private var tls: ContactTlsIdentity?
-    private var sessions: [Task<Void, Never>] = []
+    /// Each running session with the connection it is running over. **Both** are held, not
+    /// just the task: cancelling a `Task` only takes effect where it is checked, and every
+    /// suspension point in a session is a continuation wrapping an `NWConnection` callback
+    /// that will happily wait forever for bytes. Cancelling the connection is what actually
+    /// stops one, by making the read it is parked on fail.
+    private var sessions: [(task: Task<Void, Never>, connection: NWConnection)] = []
 
     // Manifest and gallery hashing walk the whole library. Computed once per start(), not
     // once per discovered peer, so several Contacts on the same WiFi do not each trigger a
@@ -102,7 +107,7 @@ final class ContactExchange {
         listener.start(queue: .global(qos: .utility))
         self.listener = listener
 
-        peers.onEndpoint = { [weak self] endpoint in
+        peers.deliverTo { [weak self] endpoint in
             Task { @MainActor in
                 guard let self, let tls = self.tls else { return }
                 self.run(NWConnection(to: endpoint, using: self.parameters(tls)), isServer: false)
@@ -112,11 +117,17 @@ final class ContactExchange {
     }
 
     func stop() {
-        peers.onEndpoint = nil
+        // Nil'd before anything else, and `tls` is cleared below, so a discovery already in
+        // flight on the browse queue finds nothing to dial by the time it reaches the
+        // main actor.
+        peers.deliverTo(nil)
         peers.stop()
         listener?.cancel()
         listener = nil
-        for session in sessions { session.cancel() }
+        for session in sessions {
+            session.task.cancel()
+            session.connection.cancel()
+        }
         sessions = []
         warmup?.cancel()
         warmup = nil
@@ -179,17 +190,29 @@ final class ContactExchange {
                     guard let ref = refById[id] else { return nil }
                     return await PhotoLibrary.reconcileExport(assetId: ref, mediaId: id)
                 },
-                receivedFile: { id, kind in PhotoLibrary.receivedMediaFile(id: id, kind: kind) }
+                receivedFile: { id, kind in PhotoLibrary.receivedMediaFile(id: id, kind: kind) },
+                // Straight to the timeline: a **Note** has no bytes to fetch and no
+                // thumbnail to cut, so there is nothing between arriving and landing.
+                landNotes: { notes in
+                    if Task.isCancelled { return }
+                    await onLanded(notes)
+                }
             )
             guard let landing, !landing.isEmpty else { return }
+            // The screen closed while this was in flight. `stop()` cancels the connection
+            // too, so a session almost always dies at a read — but once the bytes are all
+            // here there is no read left to fail, and nothing about #265 is supposed to
+            // write to the timeline after the screen is gone.
+            if Task.isCancelled { return }
             // The grid draws from the durable thumbnail tier, never from `ref`, so an
-            // item that skipped this step would land as a blank cell (#98).
-            for item in landing.values.flatMap({ $0 }) {
+            // item that skipped this step would land as a blank cell (#98). A **Note** has
+            // no bytes and no cell to fill — there is nothing to cut a thumbnail from.
+            for item in landing.values.flatMap({ $0 }) where !item.ref.isEmpty {
                 await PhotoLibrary.writeReconcileTiers(mediaId: item.id, ref: item.ref)
             }
             await onLanded(landing)
         }
-        sessions.append(session)
+        sessions.append((session, connection))
     }
 }
 
@@ -203,6 +226,13 @@ private func ready(_ connection: NWConnection) async -> Data? {
             case .ready:
                 if answered.claim() { continuation.resume(returning: true) }
             case .failed, .cancelled:
+                if answered.claim() { continuation.resume(returning: false) }
+            case .waiting:
+                // `.waiting` is not a failure to `Network.framework` — it means "cannot
+                // connect right now, will keep retrying", and without this the task parks
+                // there indefinitely. On a LAN that is a peer who walked out between
+                // announcing themselves and being dialed; there is nothing to wait for,
+                // and giving up costs at most one reconcile until the screen is reopened.
                 if answered.claim() { continuation.resume(returning: false) }
             default:
                 break
