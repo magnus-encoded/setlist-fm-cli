@@ -66,7 +66,9 @@ struct ContactTlsIdentity {
             let publicKey = SecKeyCopyPublicKey(key),
             let x963 = SecKeyCopyExternalRepresentation(publicKey, nil) as Data?,
             let spki = try? P256.Signing.PublicKey(x963Representation: x963).derRepresentation,
-            let der = selfSignedCertificate(commonName: label, spki: spki, signWith: key),
+            let der = selfSignedCertificate(commonName: label, spki: spki, sign: { tbs in
+                SecKeyCreateSignature(key, .ecdsaSignatureMessageX962SHA256, tbs as CFData, nil) as Data?
+            }),
             let certificate = SecCertificateCreateWithData(nil, der as CFData)
         else {
             SecItemDelete([kSecClass as String: kSecClassKey,
@@ -132,7 +134,13 @@ func certFingerprint(_ der: Data) -> Data {
 /// No Subject Alternative Name and no key usage, because nothing checks them — the peer's
 /// verify block accepts every certificate by design (see the note at the top of this
 /// file). Adding fields nobody reads would be more surface to encode wrongly.
-private func selfSignedCertificate(commonName: String, spki: Data, signWith key: SecKey) -> Data? {
+///
+/// `sign` is a closure rather than the `SecKey` itself so that the encoding — the part
+/// written by hand here, and the part that can be silently wrong — is assertable without a
+/// keychain. That is not hypothetical tidiness: an unsigned test host has no keychain
+/// entitlement, so `ContactTlsIdentity.make` cannot run in CI at all, and a test that
+/// needed it would skip rather than check anything.
+func selfSignedCertificate(commonName: String, spki: Data, sign: (Data) -> Data?) -> Data? {
     let name = derName(commonName)
     let tbs = derSequence([
         derExplicit(0, derInteger([2])),            // v3
@@ -144,9 +152,7 @@ private func selfSignedCertificate(commonName: String, spki: Data, signWith key:
         [UInt8](spki),
     ])
 
-    guard let signature = SecKeyCreateSignature(
-        key, .ecdsaSignatureMessageX962SHA256, Data(tbs) as CFData, nil
-    ) as Data? else { return nil }
+    guard let signature = sign(Data(tbs)) else { return nil }
 
     return Data(derSequence([
         tbs,
