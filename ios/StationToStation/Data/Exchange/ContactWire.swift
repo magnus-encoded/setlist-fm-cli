@@ -216,7 +216,7 @@ func readItemHeader(_ wire: ContactConnection) async throws -> ItemHeader? {
     guard let frame = try await wire.readFrame() else { throw ContactWireError.closedMidFrame }
     if frame.isEmpty { return nil }
     guard let header = try? wireDecoder.decode(ItemHeader.self, from: frame) else {
-        throw ContactWireError.refusedFrame
+        throw ContactWireError.refusedFrame(frame.count)
     }
     return header
 }

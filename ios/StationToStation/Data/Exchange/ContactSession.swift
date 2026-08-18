@@ -151,7 +151,7 @@ private func receiveRequested(_ wire: ContactConnection,
         // walked: a negative one makes the drain below a no-op and leaves the body sitting
         // where the next header should be, desyncing everything after it.
         guard header.bytes >= 0, header.bytes <= maxItemBytes else {
-            throw ContactWireError.refusedFrame
+            throw ContactWireError.refusedFrame(Int(clamping: header.bytes))
         }
         guard isSafeMediaId(header.id), expected.contains(header.id) else {
             try await wire.readBody(length: Int(header.bytes)) { _ in }
