@@ -61,7 +61,11 @@ final class ContactExchange {
     // Manifest and gallery hashing walk the whole library. Computed once per start(), not
     // once per discovered peer, so several Contacts on the same WiFi do not each trigger a
     // full re-hash of every photo and video.
-    private var warmup: Task<(HandoverManifest, TimelineCache, [GalleryItem]), Never>?
+    //
+    // The timeline itself is deliberately *not* cached alongside them, matching Android:
+    // it is what a plan diffs against, so a session running after another one landed media
+    // must see what landed, or it re-requests bytes that are already here.
+    private var warmup: Task<(HandoverManifest, [GalleryItem]), Never>?
 
     /// Starting the listener and the browser is what raises iOS's local-network prompt.
     /// The caller decides whether there is anything worth searching for — see
@@ -71,8 +75,8 @@ final class ContactExchange {
         guard let tls = ContactTlsIdentity.make() else { return }
         self.tls = tls
 
-        warmup = Task.detached(priority: .utility) { [manifest, mine, gallery] in
-            await (manifest(), mine(), gallery())
+        warmup = Task.detached(priority: .utility) { [manifest, gallery] in
+            await (manifest(), gallery())
         }
 
         guard let listener = try? NWListener(using: parameters(tls)) else {
@@ -151,13 +155,14 @@ final class ContactExchange {
 
     private func run(_ connection: NWConnection, isServer: Bool) {
         guard let ownCertificate = tls?.certificate else { connection.cancel(); return }
-        let session = Task.detached(priority: .utility) { [warmup, contactKeys, onLanded] in
+        let session = Task.detached(priority: .utility) { [warmup, contactKeys, mine, onLanded] in
             defer { connection.cancel() }
             guard let peerCertificate = await ready(connection) else { return }
             let candidates = await contactKeys()
             if candidates.isEmpty { return }
             guard let warmed = await warmup?.value else { return }
-            let (manifest, cache, gallery) = warmed
+            let (manifest, gallery) = warmed
+            let cache = await mine()
 
             var refById: [String: String] = [:]
             for item in cache.gigMedia.values.flatMap({ $0 }) { refById[item.id] = item.ref }
