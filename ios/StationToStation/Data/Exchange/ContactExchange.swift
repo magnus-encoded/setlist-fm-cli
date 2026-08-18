@@ -1,13 +1,23 @@
 import Foundation
 import Network
 
-/// A peer that opened a connection and then said nothing must not hold a session open
-/// forever. The analogue of Android's `soTimeout`: idle seconds, not total seconds, so a
-/// long video transfer is never the thing that trips it.
+/// A peer that vanishes mid-session — walks out of the room, drops off the WiFi — must not
+/// leave a session waiting on bytes that are never coming. TCP keepalive is what notices,
+/// and it is the closest `Network.framework` offers to Android's `soTimeout`.
 ///
-/// Generous because the far end may be hashing its own library before its manifest can be
-/// written, and that is normal rather than stalled.
-private let sessionIdleTimeout = 30
+/// Idle seconds rather than total, so a long video transfer is never what trips it, and
+/// generous because the far end may still be hashing its own library before its manifest
+/// can be written — normal, not stalled.
+///
+/// ponytail: this catches a peer that *left*, not one that is present and silent, which
+/// Android's per-read timeout does catch. A live peer holding a connection open and
+/// saying nothing costs one suspended task until the Exchange screen closes and `stop()`
+/// cancels it — bounded by the screen, which is the whole scope of this feature anyway.
+/// If that ever matters, give each session an overall deadline rather than reaching for a
+/// per-read one that does not exist here.
+private let keepaliveIdleSeconds = 30
+private let keepaliveProbes = 2
+private let keepaliveIntervalSeconds = 5
 
 /// One device's whole participation in #265 while the Exchange screen is open: advertise
 /// and browse over the same WiFi via `ContactPeers`, accept or open a TLS connection for
@@ -130,7 +140,10 @@ final class ContactExchange {
         }, .global(qos: .utility))
 
         let tcp = NWProtocolTCP.Options()
-        tcp.connectionIdleTimeout = sessionIdleTimeout
+        tcp.enableKeepalive = true
+        tcp.keepaliveIdle = keepaliveIdleSeconds
+        tcp.keepaliveCount = keepaliveProbes
+        tcp.keepaliveInterval = keepaliveIntervalSeconds
         let parameters = NWParameters(tls: options, tcp: tcp)
         parameters.includePeerToPeer = true
         return parameters

@@ -91,7 +91,7 @@ enum ContactIdentity {
             kSecAttrIsPermanent as String: true,
             kSecAttrApplicationTag as String: tag,
         ]
-        var attributes: [String: Any] = [
+        let attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits as String: 256,
             kSecPrivateKeyAttrs as String: privateAttributes,
