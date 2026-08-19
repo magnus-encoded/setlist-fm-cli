@@ -587,6 +587,16 @@ actor TimelineStore {
         }
     }
 
+    /// The union a device handover decided, written under this actor's own lock (#142).
+    ///
+    /// Takes the *plan function*, not a plan: a handover can run for minutes, and a union
+    /// computed against a cache read before it started would discard everything this
+    /// device wrote meanwhile — a Contact reconcile landing, a note typed. Running it here
+    /// means the cache it merges into is the cache being written.
+    func applyHandover(_ plan: (TimelineCache) -> HandoverPlan) {
+        writeMerged { plan($0).merged }
+    }
+
     /// Where each song starts inside one recording, replacing what was there.
     ///
     /// By media id, not by night: a night with two recordings has two answers,
