@@ -2996,8 +2996,10 @@ fun StationEventScreen(
                 ) {
                     Text(
                         when (leaf) {
-                            GigLeaf.CAPTURE -> "noting the set — add what they play above"
-                            else -> "your log · add anything you remember above"
+                            // "above" was true when the editor sat over the set. The
+                            // entries are the set now and the way in is under it (#268).
+                            GigLeaf.CAPTURE -> "noting the set — add what they play below"
+                            else -> "your log · add anything you remember below"
                         },
                         color = Faint,
                         fontSize = 12.sp,
