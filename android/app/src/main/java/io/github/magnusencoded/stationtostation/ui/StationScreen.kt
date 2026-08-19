@@ -2175,6 +2175,7 @@ private fun MediaBand(
     // Slate while it would hold only mine, and **Crossed** once letting go means more
     // than one of us is in it.
     val accent = bandAccent(band, crossed)
+    val wash = bandWash(band, crossed)
     val tilePx = with(LocalDensity.current) { (GigPhotoSize + ItemGap).toPx() }
     // The gesture lives on the strip, never on a tile. A tile leaves the composition
     // the moment it is picked up — that is how the gap opens — and a pointerInput on
@@ -2215,7 +2216,20 @@ private fun MediaBand(
                 Text(say, color = if (crossed) Crossed else Muted, fontSize = 10.sp)
             }
         }
-        Box {
+        // One frame, and the gesture changes *it* rather than adding a second. Two
+        // outlines around one band is what this looked like when the armed state drew
+        // its own: they do not even share a rect, because the strip's own border sits
+        // inside the scroll container and travels with the content (#268).
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+                .border(
+                    if (offering) 2.dp else 1.dp,
+                    accent,
+                    RoundedCornerShape(6.dp),
+                ),
+        ) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -2236,8 +2250,11 @@ private fun MediaBand(
                             onDragCancel = onDrop,
                         )
                     }
-                    .padding(horizontal = 20.dp, vertical = 4.dp)
-                    .border(1.dp, accent, RoundedCornerShape(6.dp)),
+                    // Content padding: it is inside the scroll, so the first tile
+                    // starts clear of the edge and scrolls away under it — and
+                    // [indexUnder] counts from it. The frame is on the Box outside,
+                    // which is the rect that stays still.
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Counted over the band without the carried item, so the gap opens
@@ -2245,7 +2262,7 @@ private fun MediaBand(
                 var placed = 0
                 mine.forEach { item ->
                     if (item.id == draggingId) return@forEach
-                    if (slotAt == placed) LandingSlot()
+                    if (slotAt == placed) LandingSlot(accent, wash)
                     MediaTile(
                         item = item,
                         arranging = arranging,
@@ -2257,7 +2274,7 @@ private fun MediaBand(
                     Spacer(Modifier.width(ItemGap))
                     placed++
                 }
-                if (slotAt != null && slotAt >= placed) LandingSlot()
+                if (slotAt != null && slotAt >= placed) LandingSlot(accent, wash)
                 received.forEach { item ->
                     MediaTile(
                         item = item,
@@ -2286,8 +2303,7 @@ private fun MediaBand(
                     Modifier
                         .matchParentSize()
                         .clip(RoundedCornerShape(6.dp))
-                        .background(bandWash(band, crossed))
-                        .border(2.dp, accent, RoundedCornerShape(6.dp)),
+                        .background(wash),
                     contentAlignment = Alignment.Center,
                 ) { Text(offerText, color = Ink, fontSize = 12.sp) }
             }
@@ -2413,10 +2429,14 @@ private fun BandNotes(
     if (!editable && mine == null && received.isEmpty()) return
 
     val accent = bandAccent(band, crossed)
+    // One frame for the whole band, thickening while it is being written in — the
+    // same language the strips use, and for the same reason: a second outline around
+    // the field inside this one is two boundaries drawn for one boundary. It was
+    // Amber besides, which on a shared note is the colour of the other answer (#268).
     Column(
         Modifier
             .padding(start = 20.dp, end = 20.dp, top = 6.dp)
-            .border(1.dp, accent, RoundedCornerShape(6.dp))
+            .border(if (editing) 2.dp else 1.dp, accent, RoundedCornerShape(6.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         // Always first, whether it opens the field or reopens it over what is
@@ -2455,8 +2475,9 @@ private fun BandNotes(
                         .fillMaxWidth()
                         .heightIn(min = 108.dp)
                         .clip(RoundedCornerShape(6.dp))
+                        // No border of its own: the band's frame is the boundary, and
+                        // the darker ground is enough to say "type here".
                         .background(UnlitField)
-                        .border(1.dp, Amber, RoundedCornerShape(6.dp))
                         .padding(10.dp)
                         .focusRequester(focus),
                 )
@@ -2565,15 +2586,20 @@ private fun verdictGlyph(verdict: String?): String = when (verdict) {
     else -> ""
 }
 
-/** Where the photograph will land, opened as a real gap in the row. */
+/**
+ * Where the photograph will land, opened as a real gap in the row.
+ *
+ * In the band's own colour, not Amber: it appears mid-drag, and a drag *upward* that
+ * lights amber is saying "private" about the thing you are about to share (#268).
+ */
 @Composable
-private fun LandingSlot() {
+private fun LandingSlot(accent: Color, wash: Color) {
     Box(
         Modifier
             .size(GigPhotoSize)
             .clip(RoundedCornerShape(10.dp))
-            .background(AmberSoft)
-            .border(1.dp, Amber, RoundedCornerShape(10.dp)),
+            .background(wash)
+            .border(1.dp, accent, RoundedCornerShape(10.dp)),
     )
     Spacer(Modifier.width(ItemGap))
 }
