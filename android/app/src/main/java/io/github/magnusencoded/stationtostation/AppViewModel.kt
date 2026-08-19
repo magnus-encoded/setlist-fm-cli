@@ -717,7 +717,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         withContext(Dispatchers.IO) {
             writeAccountsStep(socket, payload)
             val step = if (readAccountsAck(socket)) AccountsMove.ACKNOWLEDGED else AccountsMove.SENT
-            if (mayClearCredentials(step)) {
+            // The payload, not the step, decides whether there is anything to let go of:
+            // an identities-only frame (the accounts row unticked, #143 story 11) travels
+            // and is acked exactly like a full one, and signing out on that ack would move
+            // an account nobody asked to move.
+            if (mayClearCredentials(step) && !payload.credentials.spotifyRefreshToken.isNullOrBlank()) {
                 settings.clearSpotifyAuth()
                 _state.update { it.copy(spotifyConnected = false, grantedScope = null) }
             }

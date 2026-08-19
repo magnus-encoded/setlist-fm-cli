@@ -1,7 +1,6 @@
 package io.github.magnusencoded.stationtostation.data.exchange
 
 import io.github.magnusencoded.stationtostation.data.AccountsMove
-import io.github.magnusencoded.stationtostation.data.CATEGORY_ACCOUNTS
 import io.github.magnusencoded.stationtostation.data.GalleryItem
 import io.github.magnusencoded.stationtostation.data.HandoverManifest
 import io.github.magnusencoded.stationtostation.data.HandoverPlan
@@ -123,8 +122,9 @@ suspend fun runHandoverSource(
     linkKey: ByteArray,
     allow: Set<String>,
     manifest: HandoverManifest,
-    /** The accounts step, whole — see `AppViewModel.sendHandoverAccounts`. Not called at
-     * all when the row was not ticked, which is what [AccountsMove.NOT_OFFERED] means. */
+    /** The accounts step, whole — see `AppViewModel.sendHandoverAccounts`. Always called;
+     * what the tick list decides is whether the payload it sends carries a credential or
+     * only identities ([AccountsMove] then reports what the far end did with it). */
     accounts: suspend (Socket) -> AccountsMove,
     mediaSource: (id: String) -> Pair<Long, InputStream>?,
     onProgress: (HandoverProgress) -> Unit = {},
@@ -132,7 +132,12 @@ suspend fun runHandoverSource(
     if (!verifyLinkKey(socket, linkKey)) return null
 
     onProgress(HandoverProgress(phase = HandoverPhase.ACCOUNTS))
-    val step = if (CATEGORY_ACCOUNTS in allow) accounts(socket) else AccountsMove.NOT_OFFERED
+    // Unconditional, whatever was ticked: the frame always travels, carrying identities
+    // only when the row was declined (#143 story 11). Skipping it when accounts are
+    // unticked would leave the receiver — which always reads one — parked on the manifest
+    // frame, reading a sealed manifest as an accounts payload and desyncing everything
+    // after it. What the tick list changes is the *payload*, not whether it is sent.
+    val step = accounts(socket)
     // Accounts complete before bytes begin. A half-finished credential move is the one
     // state worth refusing to build on.
     if (!bulkMayStart(allow, step)) {

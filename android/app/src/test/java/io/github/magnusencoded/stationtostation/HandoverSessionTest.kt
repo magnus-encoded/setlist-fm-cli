@@ -27,6 +27,7 @@ import io.github.magnusencoded.stationtostation.data.exchange.writeAccountsAck
 import io.github.magnusencoded.stationtostation.data.exchange.writeAccountsStep
 import io.github.magnusencoded.stationtostation.data.exchange.writeItem
 import io.github.magnusencoded.stationtostation.data.exchange.writeManifest
+import io.github.magnusencoded.stationtostation.data.identitiesOnly
 import io.github.magnusencoded.stationtostation.data.sealManifest
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -362,5 +363,74 @@ class HandoverSessionTest {
         assertNull(parseHandoverInvite("station-to-station://handover?h=1.2.3.4&p=0&f=aa&k=bb"))
         assertNull(parseHandoverInvite("station-to-station://handover?h=1.2.3.4&p=41234&f=aa"))
         assertNull(parseHandoverInvite("station-to-station://handover?h=1.2.3.4&p=41234&f=xyz&k=bb"))
+    }
+
+    /**
+     * The accounts row unticked, wired exactly as the two `AppViewModel` halves wire it:
+     * the source always writes the step and waits for the ack, the receiver always reads
+     * one. A source that skipped the frame when the row was unticked would leave the
+     * receiver reading the *sealed manifest* as an accounts payload, and everything after
+     * it a frame out of step — so this asserts the ordinary case, which is the one nobody
+     * ticks accounts for.
+     */
+    @Test
+    fun `records without accounts still send the identities frame, and the manifest still lands`() {
+        val dir = tempDir("handover-no-accounts")
+        val source = File(dir, "source.bin").apply { writeBytes("a photograph of the encore".toByteArray()) }
+        val landing = File(dir, "landed.bin")
+
+        val cache = sourceCache(source.toURI().toString())
+        val allow = setOf(CATEGORY_SETLISTS, StoredMedia.Kind.PHOTO)
+        val identities = Identities(setlistFmUser = "wandering-owl")
+        val manifest = withSizes(deviceManifest(cache, allow, identities), source.length(), "hash-1")
+
+        val (server, client) = pair()
+        val hosting = Thread {
+            server.accept().use { socket ->
+                runBlocking {
+                    runHandoverSource(
+                        socket = socket,
+                        linkKey = linkKey,
+                        allow = allow,
+                        manifest = manifest,
+                        accounts = { s ->
+                            writeAccountsStep(s, identitiesOnly(identities))
+                            if (readAccountsAck(s)) AccountsMove.ACKNOWLEDGED else AccountsMove.SENT
+                        },
+                        mediaSource = { source.length() to FileInputStream(source) },
+                    )
+                }
+            }
+        }
+        hosting.start()
+
+        var arrivedAccounts: AccountsPayload? = null
+        var applied: HandoverPlan? = null
+        val receipt = client.use { socket ->
+            runBlocking {
+                runHandoverReceiver(
+                    socket = socket,
+                    linkKey = linkKey,
+                    accounts = { s ->
+                        arrivedAccounts = readAccountsStep(s)
+                        writeAccountsAck(s)
+                    },
+                    mine = TimelineCache(),
+                    gallery = emptyList(),
+                    receivedFile = { _, _ -> landing },
+                    apply = { replan -> applied = replan(TimelineCache()) },
+                )
+            }
+        }
+        hosting.join(5000)
+        server.close()
+
+        // Who I am travelled; nothing that acts as me did.
+        assertEquals("wandering-owl", arrivedAccounts?.identities?.setlistFmUser)
+        assertNull(arrivedAccounts?.credentials?.spotifyRefreshToken)
+        assertEquals(1, receipt?.landed)
+        assertEquals("", receipt?.trouble)
+        assertEquals("a photograph of the encore", landing.readText())
+        assertEquals("photo-1", applied!!.merged.gigMedia.getValue("gig-1").single().id)
     }
 }
