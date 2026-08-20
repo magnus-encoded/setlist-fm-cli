@@ -299,6 +299,7 @@ internal fun Flyover(
                 frame = frame,
                 density = density,
                 thumb = thumbs[photo.id],
+                lit = photo.id == (if (photo.mine) litMine else litTheirs),
             )
         }
         Cover(
@@ -511,6 +512,8 @@ private fun FlankPhoto(
     frame: IntSize,
     density: Float,
     thumb: MediaThumb?,
+    /** The one this flank's half of the screen would give you. */
+    lit: Boolean,
 ) {
     val bitmap = thumb?.bitmap
     // The authored size, from the picture's own shape. A night is portraits and
@@ -542,7 +545,17 @@ private fun FlankPhoto(
             }
             .clip(RoundedCornerShape(6.dp))
             .background(Raised)
-            .border(1.dp, outline, RoundedCornerShape(6.dp)),
+            // The **Focal plane** picks in silence otherwise: nothing on screen said
+            // which of a dozen overlapping cards a thumb was about to take, so you
+            // aimed at what you were looking at and got something else. The walk is
+            // the selector (Variant F, no controls), which only works if the walk can
+            // be seen selecting. Its own colour at full strength and a heavier edge;
+            // everything else on that flank steps back to a hairline.
+            .border(
+                if (lit) 2.dp else 1.dp,
+                if (lit) outline else outline.copy(alpha = 0.4f),
+                RoundedCornerShape(6.dp),
+            ),
     ) {
         bitmap?.let {
             Image(
