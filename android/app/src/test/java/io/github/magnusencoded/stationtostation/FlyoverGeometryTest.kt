@@ -3,6 +3,7 @@ package io.github.magnusencoded.stationtostation
 import io.github.magnusencoded.stationtostation.ui.flyover.CoverZ
 import io.github.magnusencoded.stationtostation.ui.flyover.FarCull
 import io.github.magnusencoded.stationtostation.ui.flyover.FlyoverItem
+import io.github.magnusencoded.stationtostation.ui.flyover.CycleSpread
 import io.github.magnusencoded.stationtostation.ui.flyover.FlankX
 import io.github.magnusencoded.stationtostation.ui.flyover.PassTilt
 import io.github.magnusencoded.stationtostation.ui.flyover.RestTilt
@@ -302,6 +303,42 @@ class FlyoverGeometryTest {
 
     // --- The step, the hold and the turn -------------------------------------
 
+    /**
+     * **The slide has to be watchable, and that is what sizes the whole movement.**
+     *
+     * A photograph stepping in is further from the walker than the one a gap ahead of
+     * it, so that one is larger and drawn on top of it. Spread the movement over more
+     * than a gap and the step happens *behind* the card still holding the aisle: it is
+     * real, it is inward, and nobody ever sees it — the eye only ever meets photographs
+     * that have already arrived.
+     *
+     * Fitting come-in, stand and turn-away inside one [MinGap] is what fixes it. By the
+     * time a card starts stepping out of the rank, the one in front of it has reached
+     * [TurnEnd] and gone.
+     */
+    @Test
+    fun `nothing stands in front of a photograph while it steps in`() {
+        assertTrue("the whole movement inside one gap", CycleSpread <= MinGap)
+        var n = HoldFrom - SlideSpread
+        while (n <= HoldFrom) {
+            assertTrue("stepping in", flankStep(n) < 1.0)
+            assertEquals(
+                "and the one a gap ahead is already gone",
+                0f,
+                flankOpacity(n + MinGap),
+                0.001f,
+            )
+            n += SlideSpread / 8
+        }
+    }
+
+    /** And the same claim from the other end: on a packed flank there is no room left
+     *  between the pick and the exit for anything to stand in. */
+    @Test
+    fun `nothing stands between the pick and the exit`() {
+        assertTrue(TurnEnd - FocalPlane < MinGap)
+    }
+
     /** Fully out of the rank exactly where a tap would take it. The step *is* the
      *  affordance: nearest the spine means yours. */
     @Test
@@ -320,34 +357,33 @@ class FlyoverGeometryTest {
     }
 
     /**
-     * **The runway.** A photograph stands fully in the aisle for a whole gap rather
-     * than touching it for one value of travel and unwinding — there has to be
-     * somewhere for the eye to rest and something to aim a thumb at.
+     * **The runway.** A photograph stands fully in the aisle for a stretch rather than
+     * touching it at one value of travel and unwinding — there has to be somewhere for
+     * the eye to rest and something to aim a thumb at.
      */
     @Test
     fun `the one in the aisle stays there for a stretch of the walk`() {
+        assertTrue("a real stretch of night", HoldSpread > 0.0)
         var n = HoldFrom
         while (n <= HoldTo) {
             assertEquals("fully in across the hold", 1.0, flankStep(n), 0.001)
             n += HoldSpread / 8
         }
-        assertTrue("and it is a real stretch of night", HoldSpread >= MinGap)
     }
 
     /**
-     * **The hold is the pick.** [focalPick] takes whatever is nearest the plane, so on
-     * an evenly packed flank the pick changes exactly halfway between two photographs —
-     * which is where the hold ends. Fully stepped in and "the one a tap takes" are
-     * therefore the same stretch of walk, and the two hand over together.
+     * The hold sits in the middle of the stretch where this photograph is what
+     * [focalPick] answers with, so it never straddles a handover: nothing is ever fully
+     * in the aisle while a tap would give you something else.
      */
     @Test
-    fun `the hold begins and ends where the pick changes hands`() {
+    fun `the hold falls inside the stretch where this one is the pick`() {
         val both = listOf(
             PlacedItem("here", mine = true, z = 0.0),
             PlacedItem("next", mine = true, z = MinGap),
         )
-        assertEquals("here", focalPick(both, FocalPlane + HoldSpread / 2 - 1, mine = true))
-        assertEquals("next", focalPick(both, FocalPlane + HoldSpread / 2 + 1, mine = true))
+        assertEquals("here", focalPick(both, HoldFrom, mine = true))
+        assertEquals("here", focalPick(both, HoldTo, mine = true))
     }
 
     /**
@@ -380,11 +416,10 @@ class FlyoverGeometryTest {
         var previous = Double.MAX_VALUE
         var n = HoldFrom - SlideSpread
         // Stopping a sixteenth short of the hold, and that is the movement rather than
-        // a convenience: the ease-out goes so flat at the end that the swelling wins
-        // the last stretch and carries the card a unit back out. It is the same
-        // cancellation as above, arriving at the moment the step means it to — the
-        // card settles, then rides out on its own size. Asserting through it would be
-        // asserting the hang away.
+        // a convenience: the ease-out goes flat enough at the end that the swelling
+        // takes back the last fraction of a unit. It is the same cancellation, arriving
+        // where the step means it to — the card settles, then rides out on its own
+        // size. Asserting through it would be asserting the hang away.
         val settled = HoldFrom - SlideSpread / 8
         while (n <= settled) {
             val x = flankScreenX(n)
@@ -400,18 +435,6 @@ class FlyoverGeometryTest {
         assertTrue(
             "and it never drifts back out to where it began",
             flankScreenX(HoldTo) < start,
-        )
-    }
-
-    /** One gap, so at most one photograph is ever on its way in. */
-    @Test
-    fun `only one photograph is ever on its way into the aisle`() {
-        assertTrue("no wider than the tightest packing", SlideSpread <= MinGap)
-        assertEquals(
-            "so the one a gap behind it is still at the wall",
-            0.0,
-            flankStep(HoldFrom - SlideSpread - 1),
-            0.001,
         )
     }
 
@@ -444,19 +467,7 @@ class FlyoverGeometryTest {
         assertEquals(0.0, RestTilt, 0.001)
     }
 
-    /**
-     * **Exactly one photograph is ever mid-turn.** The card between the walker and the
-     * pick is the one that can bury it — it is nearer, so larger, and drawn on top —
-     * and a turn spread over two gaps leaves two of them large, half-round and solid
-     * in front of the very thing the step exists to expose.
-     */
-    @Test
-    fun `only one photograph is caught mid-turn`() {
-        assertTrue("no wider than the tightest packing", TurnSpread <= MinGap)
-        assertEquals("so the next one along is already flat", PassTilt, flankTilt(HoldTo + MinGap), 0.001)
-    }
-
-    /** Past the hold it turns parallel to the walk and goes by as a panel. */
+    /** Past the hold it turns parallel to the walk and goes. */
     @Test
     fun `the turn is the departure`() {
         assertEquals(PassTilt, flankTilt(TurnEnd), 0.001)
@@ -495,24 +506,6 @@ class FlyoverGeometryTest {
         // Travel that puts `past` beyond the turn and `ahead` still approaching.
         val at = TurnEnd + MinGap
         assertEquals("ahead", focalPick(listOf(past, ahead), at, mine = true))
-    }
-
-    /**
-     * The one the walk buries is the one it must not. The photographs between the
-     * walker and the plane are nearer, so larger, and drawn on top. Stepping in makes
-     * the pick the one closest to the spine, and everything in front of it is both
-     * further out and further round.
-     */
-    @Test
-    fun `nothing in front of the pick stands closer in or straighter`() {
-        val pickOffset = flankScreenX(FocalPlane)
-        val pickTilt = flankTilt(FocalPlane)
-        var n = HoldTo + MinGap
-        while (n <= TurnEnd) {
-            assertTrue("further out than the pick", flankScreenX(n) > pickOffset)
-            assertTrue("and further round", flankTilt(n) > pickTilt)
-            n += MinGap
-        }
     }
 
     /**

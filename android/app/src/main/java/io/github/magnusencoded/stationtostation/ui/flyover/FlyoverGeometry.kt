@@ -106,34 +106,46 @@ const val PassTilt = 88.0
  *  middle of the aisle. */
 const val SlideIn = FlankX / 2
 
-/** The depth the step takes, finishing at [HoldFrom]. One gap, so at most one
- *  photograph is ever on its way in. */
-const val SlideSpread = MinGap
+/**
+ * The whole movement — come in, stand there, turn away and go — inside one gap.
+ *
+ * **One photograph off the wall at a time.** On a packed flank the cards are [MinGap]
+ * apart, so a cycle any longer than that has the next one stepping out before the last
+ * has finished leaving: two and three displaced cards at once, and none of them
+ * obviously *the* one. Fitting the cycle to the packing is what makes "out of line"
+ * mean something.
+ *
+ * It also buys the thing the step kept fighting for. The inward step has to outrun
+ * [projectedScale]'s swelling (see [flankScreenX]); over a third of a gap it outruns it
+ * nearly sevenfold instead of barely twice, so the card comes in hard and stays inward
+ * the whole way. And nothing is ever left standing between the pick and the exit —
+ * [TurnEnd] is less than a gap past the **Focal plane**, so there is no room for one.
+ */
+const val CycleSpread = MinGap
+
+/** The depth the step takes, finishing at [HoldFrom]. */
+const val SlideSpread = CycleSpread / 3
 
 /**
  * How long a photograph stands fully in the aisle before it leaves — the runway the
  * step arrives on.
  *
- * **One gap, and that is not a taste knob.** [focalPick] takes whatever is nearest the
- * **Focal plane**, so with photographs packed at [MinGap] the pick changes exactly
- * halfway between two of them. A hold one gap wide therefore makes *fully stepped in*
- * and *the one a tap takes* the same stretch of walk, and hands over from one card to
- * the next at the moment the pick does. Without it the step is a triangle: the card
- * touches the aisle for a single value of travel and is already unwinding, so there is
- * nothing to aim at and nowhere for the eye to rest.
+ * Without it the step is a triangle: the card touches the aisle for a single value of
+ * travel and is already unwinding, at its greatest speed at the one moment it should be
+ * still. There is nothing to aim a thumb at and nowhere for the eye to rest.
+ *
+ * Centred on the **Focal plane**, so it sits in the middle of the stretch where this
+ * photograph is what [focalPick] answers with, and never straddles a handover.
  */
-const val HoldSpread = MinGap
+const val HoldSpread = CycleSpread / 3
 
 /** The stretch either side of the **Focal plane** where one photograph is the one. */
 const val HoldFrom = FocalPlane - HoldSpread / 2
 const val HoldTo = FocalPlane + HoldSpread / 2
 
-/** The depth the turn takes, starting at [HoldTo], and the depth the step unwinds over.
- *  One gap on a packed flank, which is the point: exactly one photograph is ever
- *  mid-turn, and the one after it is already a hairline. Wider, and the two or three
- *  cards between the walker and the pick are large, half-turned and solid — they bury
- *  the very thing the step exists to expose. */
-const val TurnSpread = MinGap
+/** The depth the turn takes, starting at [HoldTo], and the depth the step unwinds
+ *  over. */
+const val TurnSpread = CycleSpread / 3
 
 /**
  * Where a photograph leaves: the instant the turn completes.
