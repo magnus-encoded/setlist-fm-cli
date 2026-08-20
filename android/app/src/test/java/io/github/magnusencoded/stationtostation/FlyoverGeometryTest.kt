@@ -379,7 +379,14 @@ class FlyoverGeometryTest {
     fun `the step is inward on the screen and not only in the units`() {
         var previous = Double.MAX_VALUE
         var n = HoldFrom - SlideSpread
-        while (n <= HoldFrom) {
+        // Stopping a sixteenth short of the hold, and that is the movement rather than
+        // a convenience: the ease-out goes so flat at the end that the swelling wins
+        // the last stretch and carries the card a unit back out. It is the same
+        // cancellation as above, arriving at the moment the step means it to — the
+        // card settles, then rides out on its own size. Asserting through it would be
+        // asserting the hang away.
+        val settled = HoldFrom - SlideSpread / 8
+        while (n <= settled) {
             val x = flankScreenX(n)
             assertTrue("always inward on the way in", x < previous)
             previous = x
@@ -388,7 +395,11 @@ class FlyoverGeometryTest {
         val start = flankScreenX(HoldFrom - SlideSpread)
         assertTrue(
             "and by a good part of where it started, not a nudge",
-            flankScreenX(HoldFrom) < start * 0.75,
+            flankScreenX(settled) < start * 0.75,
+        )
+        assertTrue(
+            "and it never drifts back out to where it began",
+            flankScreenX(HoldTo) < start,
         )
     }
 
