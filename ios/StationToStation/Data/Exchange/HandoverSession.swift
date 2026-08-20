@@ -140,7 +140,7 @@ func runHandoverReceiver(
     mine: TimelineCache,
     gallery: [GalleryItem],
     receivedFile: (String, String) -> URL,
-    apply: ((TimelineCache) -> HandoverPlan) async -> Void,
+    apply: (@escaping (TimelineCache) -> HandoverPlan) async -> Void,
     onProgress: @escaping (HandoverProgress) -> Void = { _ in }
 ) async throws -> HandoverReceipt? {
     try await proveLinkKey(wire, linkKey: linkKey)
