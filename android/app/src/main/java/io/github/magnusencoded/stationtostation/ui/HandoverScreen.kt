@@ -34,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,6 +86,12 @@ private val Serif = FontFamily.Serif
 fun HandoverScreen(viewModel: AppViewModel, onDone: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val handover = state.handover
+
+    // Leaving the screen ends the session, by whatever route — the back arrow calls onDone,
+    // but the system back gesture and a pop from anywhere else do not, and a handover left
+    // running behind a closed screen is a listening socket and an open connection nobody can
+    // see or stop.
+    DisposableEffect(Unit) { onDispose { viewModel.dismissHandover() } }
 
     Scaffold(
         containerColor = Ground,

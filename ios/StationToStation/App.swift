@@ -64,6 +64,12 @@ struct StationToStationApp: App {
                 // to pin and the key for the transfer, which is why any camera can open
                 // it and only the phone that read it can join.
                 if url.host == "handover" {
+                    // Parsed here rather than trusting the host alone: a truncated or
+                    // hand-typed link would otherwise land the reader on the *source*
+                    // side's tick list — this phone offering to hand itself over, from a
+                    // link that asked it to receive. A link that is not an invite is not
+                    // a navigation.
+                    guard parseHandoverInvite(url.absoluteString) != nil else { return }
                     model.joinHandover(url)
                     nav.popToRoot()
                     nav.push(.handover)

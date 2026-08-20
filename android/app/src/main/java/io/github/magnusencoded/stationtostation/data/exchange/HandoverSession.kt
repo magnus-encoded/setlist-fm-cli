@@ -10,6 +10,8 @@ import io.github.magnusencoded.stationtostation.data.categoriesFor
 import io.github.magnusencoded.stationtostation.data.handoverPlan
 import io.github.magnusencoded.stationtostation.data.openManifest
 import io.github.magnusencoded.stationtostation.data.sealManifest
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 import java.net.Socket
@@ -248,7 +250,14 @@ suspend fun runHandoverReceiver(
     val replan = { current: TimelineCache ->
         handoverPlan(current, offer, allow, verified = true, gallery = gallery, received = arrived)
     }
-    apply(replan)
+    // NonCancellable, and this is the line that makes the paragraph above true rather
+    // than aspirational. Cancelling a handover closes the socket *and* cancels the job, so
+    // by the time execution reaches here the coroutine is already Cancelling — and both
+    // `withContext(Dispatchers.IO)` and the store's write lock throw on entry in that
+    // state. The write would be skipped, and every complete item that just landed would
+    // sit on disk with nothing in the timeline pointing at it, under a screen that says
+    // what arrived was kept.
+    withContext(NonCancellable) { apply(replan) }
     // The same function again for the receipt's tallies, against the cache the plan was
     // first computed from. Counting what *this* transfer resolved, not what the union
     // happens to hold once everything else on the device is folded in.

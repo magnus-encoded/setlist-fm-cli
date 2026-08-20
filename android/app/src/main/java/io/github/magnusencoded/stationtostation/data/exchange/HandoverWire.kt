@@ -58,7 +58,11 @@ import javax.net.ssl.X509TrustManager
  * plain JVM sockets over loopback, no radio and no device required.
  */
 
-private val wireJson = Json { encodeDefaults = true }
+// ignoreUnknownKeys, because the two ends of a handover are two *installs*, and the older
+// one has to survive a frame from the newer one that carries a field it has never heard of.
+// Without it, adding one optional field anywhere turns every cross-version transfer into a
+// dropped connection.
+private val wireJson = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
 /** SHA-256 of the DER encoding — what the QR carries and what the client pins against. */
 fun certFingerprint(cert: Certificate): ByteArray =
@@ -212,7 +216,8 @@ fun writeAccountsStep(socket: Socket, payload: AccountsPayload) =
  * is gated on, so it must not be sent a moment before the payload is durable. */
 fun readAccountsStep(socket: Socket): AccountsPayload? {
     val frame = readFrame(socket.getInputStream()) ?: return null
-    return wireJson.decodeFromString<AccountsPayload>(frame.toString(Charsets.UTF_8))
+    return runCatching { wireJson.decodeFromString<AccountsPayload>(frame.toString(Charsets.UTF_8)) }
+        .getOrNull()
 }
 
 private val ACCOUNTS_ACK = "accounts-stored".toByteArray(Charsets.UTF_8)

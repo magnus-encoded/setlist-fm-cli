@@ -753,17 +753,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * [deviceManifest]. Nothing outside it reaches the wire.
      */
     fun offerHandover(allow: Set<String>) {
-        handoverJob?.cancel()
+        // Not just a cancel: the previous session may be parked on a blocking accept, and
+        // overwriting `handoverCloseables` below would drop the only reference to it.
+        endHandover()
         handoverUi { HandoverUi(role = HandoverRole.SOURCE) }
         val sessionId = UUID.randomUUID().toString().take(8)
         handoverJob = viewModelScope.launch(Dispatchers.IO) {
             try {
+                // Asked before anything is bound: there is nothing to put in the QR
+                // without it, and a socket opened first would be one the throw below
+                // leaves bound with nothing holding a reference to close it.
+                val host = localLinkAddress(getApplication())
+                    ?: throw IllegalStateException("this phone is not on a network to hand over across")
                 val (cert, keyStore) = generateHandoverIdentity(sessionId)
                 val linkKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
                 val server = sslServerContext(keyStore, CharArray(0)).serverSocketFactory.createServerSocket(0)
                 handoverCloseables = listOf(server)
-                val host = localLinkAddress(getApplication())
-                    ?: throw IllegalStateException("this phone is not on a network to hand over across")
                 handoverUi {
                     it.copy(
                         inviteUri = HandoverInvite(host, server.localPort, certFingerprint(cert), linkKey).toUri(),
@@ -811,7 +816,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun joinHandover(uri: Uri) {
         val invite = parseHandoverInvite(uri.toString()) ?: return
-        handoverJob?.cancel()
+        endHandover()
         handoverUi { HandoverUi(role = HandoverRole.RECEIVER) }
         handoverJob = viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -845,11 +850,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Starting is not a commitment (#142 story 15). What already arrived stays. */
-    fun cancelHandover() {
+    /**
+     * The one way a handover session ends: **close, then cancel**.
+     *
+     * That order is the whole of it. A blocking `accept()` or socket read cannot be
+     * interrupted by cancelling the job — the coroutine is parked in a native call — so a
+     * cancel on its own leaves a bound port, an IO thread and an un-forgotten
+     * `AndroidKeyStore` identity behind, and leaves a phone that already read the QR able
+     * to complete the whole transfer against a screen nobody is looking at. Closing the
+     * socket is what makes the parked read throw and the coroutine's own `finally` run.
+     */
+    private fun endHandover() {
         handoverCloseables.forEach { runCatching { it.close() } }
+        handoverCloseables = emptyList()
         handoverJob?.cancel()
         handoverJob = null
+    }
+
+    /** Starting is not a commitment (#142 story 15). What already arrived stays. */
+    fun cancelHandover() {
+        endHandover()
         handoverUi {
             if (it.receipt != null) it else it.copy(
                 progress = it.progress.copy(phase = HandoverPhase.FAILED),
@@ -858,10 +878,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Leaves the handover screen's state behind, once it has been read. */
+    /**
+     * Leaves the handover screen's state behind, once it has been read — and takes the
+     * session with it, because this is also what a *back gesture* off the screen calls
+     * (see `HandoverScreen`'s `DisposableEffect`). Leaving the screen with a listener
+     * still up would mean a transfer completing behind it.
+     */
     fun dismissHandover() {
-        handoverJob?.cancel()
-        handoverJob = null
+        endHandover()
         handoverUi { HandoverUi() }
     }
 

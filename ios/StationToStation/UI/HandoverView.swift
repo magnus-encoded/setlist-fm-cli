@@ -149,9 +149,12 @@ struct HandoverView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(phaseWords(p)).foregroundStyle(ink)
             if p.phase == .transfer && p.bytesTotal > 0 {
-                ProgressView(value: Double(p.bytesDone), total: Double(max(p.bytesTotal, 1)))
+                // A total that a video's unknown size left short is a floor, not a promise:
+                // clamped so the bar never overshoots and the words never read "8 MB of 4 MB".
+                let total = max(p.bytesTotal, p.bytesDone)
+                ProgressView(value: Double(p.bytesDone), total: Double(max(total, 1)))
                     .tint(amber)
-                Text("\(humanBytes(p.bytesDone)) of \(humanBytes(p.bytesTotal))")
+                Text("\(humanBytes(p.bytesDone)) of \(humanBytes(total))")
                     .font(.caption).foregroundStyle(muted)
             }
         }
@@ -217,14 +220,15 @@ struct HandoverView: View {
     }
 }
 
-/// Bytes as a person reads them. Binary units, one decimal, and no dependency.
+/// Bytes as a person reads them. Decimal units — kB is 1000 B, as the labels say and as
+/// Android's own formatter and the Files app both count — one decimal, and no dependency.
 func humanBytes(_ bytes: Int64) -> String {
-    if bytes < 1024 { return "\(bytes) B" }
+    if bytes < 1000 { return "\(bytes) B" }
     let units = ["kB", "MB", "GB", "TB"]
-    var value = Double(bytes) / 1024
+    var value = Double(bytes) / 1000
     var unit = 0
-    while value >= 1024 && unit < units.count - 1 {
-        value /= 1024
+    while value >= 1000 && unit < units.count - 1 {
+        value /= 1000
         unit += 1
     }
     return String(format: "%.1f %@", value, units[unit])
