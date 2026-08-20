@@ -69,40 +69,70 @@ const val FocalLength = 900.0
 const val FocalPlane = 300.0
 
 /**
- * **The turn**: how far a photograph is swung toward the corridor wall, in degrees.
+ * **The step** and **the turn**: a photograph leaves the rank to be looked at, and
+ * turns flat to go past.
  *
- * A rack of records, not a row of pictures. A photograph the walk has not reached
- * stands *in the stack* — near enough edge-on that it is a bright sliver against the
- * wall — and is pulled round to face the walker as the **Focal plane** arrives at it.
- * Past it, it turns back into the stack.
+ * Two movements, one after the other rather than at once, because they say different
+ * things. On the way in a photograph **steps in toward the spine** — out of the rank
+ * and into the aisle — at its resting angle: that is the walk saying *this is the one*,
+ * and it is a step you can see coming a couple of gaps away. Once past the **Focal
+ * plane** it stops being yours to take, so it turns **parallel to the walk** and falls
+ * back to the wall, slipping by as a panel rather than smearing across the screen as a
+ * billboard.
  *
- * This is what makes **Variant F** work in a crowded night. With a fixed angle, the
- * three photographs standing between the walker and the focal plane are nearer, so
- * larger, and drawn on top: the one a tap would take was systematically buried behind
- * the ones you were actually looking at. Turned away they are slivers, and cover
- * nothing. The photograph facing you *is* the photograph you get — no marker over the
- * scene saying so, which is the whole point of having no controls.
- *
- * [FaceOnTilt] is not zero: dead-on would flatten the corridor into a strip of
- * postcards, and the small turn is what says the wall has depth.
+ * This is what lets **Variant F** have no controls at all. With a fixed angle and a
+ * fixed offset the three photographs standing between the walker and the plane are
+ * nearer, so larger, and drawn on top: the one a tap would take was buried behind the
+ * ones you were actually looking at. Stepped in it is the one nearest the spine, and
+ * everything past it has turned edge-on and covers nothing.
  */
-const val FaceOnTilt = 22.0
-const val StackTilt = 78.0
 
-/**
- * How much depth the turn takes. At [MinGap] — a packed flank's spacing — a
- * photograph's immediate neighbour is already halfway into the stack, which is the
- * separation the eye needs to tell one card from the next.
- */
+/** In the rank. Not zero — dead-on would flatten the corridor into a strip of
+ *  postcards, and the small turn is what says the wall has depth. */
+const val RestTilt = 22.0
+
+/** Parallel to the walk. Not a clean 90°, which collapses the card to a line and
+ *  gives the rasteriser nothing to hold on to; a hairline is the point of leaving it
+ *  short. */
+const val PassTilt = 88.0
+
+/** How far in off [FlankX] a photograph steps to be the one. Not the whole way: both
+ *  flanks step in, and they must not meet in the middle of the aisle. */
+const val SlideIn = 60.0
+
+/** The depth the step takes, finishing at the **Focal plane**. Wide enough — some two
+ *  and a half gaps on a packed flank — that the step reads as an approach and not as a
+ *  card snapping sideways. */
+const val SlideSpread = 400.0
+
+/** The depth the turn takes, starting at the **Focal plane**, and the depth the step
+ *  unwinds over. Finishes well inside [NearCull], so a photograph is already flat
+ *  before it is gone rather than vanishing mid-swing. */
 const val TurnSpread = 300.0
 
 /**
- * The turn for something at [net], in degrees from face-on. Symmetric: approaching and
- * departing look the same, because the walk reads the same in both directions.
+ * How far out of the rank something at [net] has stepped: 0 at the wall, 1 fully into
+ * the aisle. Rises across [SlideSpread] on the way in, falls across [TurnSpread] on the
+ * way out — so the photograph goes back where it came from as it turns.
+ */
+fun flankStep(net: Double): Double {
+    val arriving = (net - (FocalPlane - SlideSpread)) / SlideSpread
+    val leaving = 1.0 - (net - FocalPlane) / TurnSpread
+    return minOf(arriving.coerceIn(0.0, 1.0), leaving.coerceIn(0.0, 1.0))
+}
+
+/** How far off the spine something at [net] stands, in units. */
+fun flankOffset(net: Double): Double = FlankX - SlideIn * flankStep(net)
+
+/**
+ * The angle for something at [net], in degrees off face-on.
+ *
+ * Flat at rest all the way in — the turn is the *departure*, and turning on approach
+ * as well would make the two halves of the movement say the same thing twice.
  */
 fun flankTilt(net: Double): Double {
-    val away = kotlin.math.abs(net - FocalPlane) / TurnSpread
-    return FaceOnTilt + (StackTilt - FaceOnTilt) * away.coerceIn(0.0, 1.0)
+    val past = ((net - FocalPlane) / TurnSpread).coerceIn(0.0, 1.0)
+    return RestTilt + (PassTilt - RestTilt) * past
 }
 
 /** Where a passed item begins to go, and where it is gone. Softens the last moment

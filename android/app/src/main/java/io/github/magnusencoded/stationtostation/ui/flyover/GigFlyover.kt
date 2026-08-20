@@ -499,15 +499,14 @@ private fun BoxScope.Markers(night: FlyoverNight, travel: Travel, frame: IntSize
  * One photograph, on its flank.
  *
  * The scene's projection is done by hand and applied as a plain scale and translation.
- * The only thing left to `graphicsLayer`'s own camera is [flankTilt]'s turn.
- *
- * That used to be a fixed 26°, where the keystone is about three percent and the
- * framework's default camera was indistinguishable from the scene's. The turn now
- * reaches [StackTilt], where it is not: a card that far round keystones hard under
- * whatever `cameraDistance` defaults to. That is wanted rather than tolerated — a
- * record in a rack does recede — but it does mean the two cameras now disagree
- * visibly, and if the stack ever looks wrong it is this and not the arithmetic. The
- * fix would be to set `cameraDistance` from [FocalLength]; it is left alone until
+ * The only thing left to `graphicsLayer`'s own camera is [flankTilt]'s turn. At
+ * [RestTilt] the keystone is about three percent and the framework's default camera is
+ * indistinguishable from the scene's. On the way past it reaches [PassTilt], where it
+ * is not: a card that far round keystones hard under whatever `cameraDistance`
+ * defaults to. That is wanted rather than tolerated — a panel going by does recede —
+ * but it does mean the two cameras disagree visibly at exactly the moment a photograph
+ * is leaving, and if the departure ever looks wrong it is this and not the arithmetic.
+ * The fix would be to set `cameraDistance` from [FocalLength]; left alone until
  * something on a screen says it needs setting.
  */
 @Composable
@@ -543,12 +542,14 @@ private fun FlankPhoto(
                 val s = projectedScale(n).toFloat()
                 scaleX = s
                 scaleY = s
-                translationX = (if (photo.mine) -FlankX else FlankX).toFloat() * density * s
+                // Stepped out of the rank toward the spine as the walk reaches it,
+                // and back to the wall as it goes by.
+                val off = flankOffset(n).toFloat()
+                translationX = (if (photo.mine) -off else off) * density * s
                 translationY = frame.height * VanishY - frame.height / 2f
-                // The turn: flat in the stack until the walk reaches it, round to face
-                // the walker at the focal plane, back into the stack as you pass.
-                // Mirrored across the spine, so both flanks turn toward you and not
-                // through each other.
+                // The turn is the departure: at rest all the way in, round to
+                // parallel with the walk on the way past. Mirrored across the spine,
+                // so both flanks turn away from the walker and not through each other.
                 val turn = flankTilt(n).toFloat()
                 rotationY = if (photo.mine) turn else -turn
             }

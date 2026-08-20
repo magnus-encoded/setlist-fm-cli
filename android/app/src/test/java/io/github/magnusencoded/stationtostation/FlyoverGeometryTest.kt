@@ -3,9 +3,14 @@ package io.github.magnusencoded.stationtostation
 import io.github.magnusencoded.stationtostation.ui.flyover.CoverZ
 import io.github.magnusencoded.stationtostation.ui.flyover.FarCull
 import io.github.magnusencoded.stationtostation.ui.flyover.FlyoverItem
-import io.github.magnusencoded.stationtostation.ui.flyover.FaceOnTilt
-import io.github.magnusencoded.stationtostation.ui.flyover.StackTilt
+import io.github.magnusencoded.stationtostation.ui.flyover.FlankX
+import io.github.magnusencoded.stationtostation.ui.flyover.PassTilt
+import io.github.magnusencoded.stationtostation.ui.flyover.RestTilt
+import io.github.magnusencoded.stationtostation.ui.flyover.SlideIn
+import io.github.magnusencoded.stationtostation.ui.flyover.SlideSpread
 import io.github.magnusencoded.stationtostation.ui.flyover.TurnSpread
+import io.github.magnusencoded.stationtostation.ui.flyover.flankOffset
+import io.github.magnusencoded.stationtostation.ui.flyover.flankStep
 import io.github.magnusencoded.stationtostation.ui.flyover.flankTilt
 import io.github.magnusencoded.stationtostation.ui.flyover.FocalLength
 import io.github.magnusencoded.stationtostation.ui.flyover.FocalPlane
@@ -288,62 +293,81 @@ class FlyoverGeometryTest {
         assertEquals("m", focalPick(placed, at, mine = true))
     }
 
-    // --- The turn -----------------------------------------------------------
+    // --- The step and the turn ----------------------------------------------
 
-    /** At the plane it faces you. That is the whole affordance: the one facing the
-     *  walker is the one a thumb takes. */
+    /** Fully out of the rank exactly where a tap would take it. The step *is* the
+     *  affordance: nearest the spine means yours. */
     @Test
-    fun `the photograph at the plane faces the walker`() {
-        assertEquals(FaceOnTilt, flankTilt(FocalPlane), 0.001)
+    fun `the photograph at the plane stands furthest into the aisle`() {
+        assertEquals(1.0, flankStep(FocalPlane), 0.001)
+        assertEquals(FlankX - SlideIn, flankOffset(FocalPlane), 0.001)
     }
 
-    /**
-     * Its neighbours on a packed flank are already half turned away — the separation
-     * that stops a crowded night reading as one wall of cards.
-     */
+    /** Out at the wall while it is still someone else's turn, at either end. */
     @Test
-    fun `a neighbour on a packed flank is halfway into the stack`() {
-        val half = FaceOnTilt + (StackTilt - FaceOnTilt) * (MinGap / TurnSpread)
-        assertEquals(half, flankTilt(FocalPlane + MinGap), 0.001)
-        assertEquals("and the same behind", half, flankTilt(FocalPlane - MinGap), 0.001)
+    fun `a photograph the walk has not reached stands at the wall`() {
+        assertEquals(0.0, flankStep(FocalPlane - SlideSpread), 0.001)
+        assertEquals(FlankX, flankOffset(FocalPlane - SlideSpread), 0.001)
+        assertEquals("and back at it once past", 0.0, flankStep(FocalPlane + TurnSpread), 0.001)
+        assertEquals(FlankX, flankOffset(FocalPlane + TurnSpread), 0.001)
     }
 
-    /** Coming and going look the same, because the walk reads the same both ways. */
+    /** The step reads as an approach, not as a card snapping sideways: it is under way
+     *  a couple of gaps out and never reverses on the way in. */
     @Test
-    fun `the turn is symmetric about the plane`() {
-        for (d in listOf(40.0, 150.0, 299.0, 900.0)) {
-            assertEquals(flankTilt(FocalPlane + d), flankTilt(FocalPlane - d), 0.001)
+    fun `the step comes on gradually`() {
+        var previous = -1.0
+        var n = FocalPlane - SlideSpread
+        while (n <= FocalPlane) {
+            val step = flankStep(n)
+            assertTrue("never backwards on the way in", step >= previous)
+            previous = step
+            n += MinGap / 2
         }
+        assertTrue("already begun two gaps out", flankStep(FocalPlane - 2 * MinGap) > 0.2)
+        assertTrue("and well under way one gap out", flankStep(FocalPlane - MinGap) > 0.5)
     }
 
     /**
-     * Never past flat, at either end of the corridor. A card turned further than
-     * [StackTilt] would start coming back round with its back to the walker.
+     * **Slide first, turn after.** All the way in it is at rest — turning on approach
+     * as well would make the two halves of the movement say the same thing twice.
      */
     @Test
-    fun `nothing turns past flat`() {
-        assertEquals(StackTilt, flankTilt(FocalPlane + TurnSpread), 0.001)
-        assertEquals(StackTilt, flankTilt(NearCull), 0.001)
-        assertEquals(StackTilt, flankTilt(-FarCull), 0.001)
+    fun `nothing turns before the plane`() {
+        assertEquals(RestTilt, flankTilt(FocalPlane), 0.001)
+        assertEquals(RestTilt, flankTilt(FocalPlane - MinGap), 0.001)
+        assertEquals(RestTilt, flankTilt(-FarCull), 0.001)
+    }
+
+    /** Past the plane it turns parallel to the walk and goes by as a panel. */
+    @Test
+    fun `the turn is the departure`() {
+        assertEquals(PassTilt, flankTilt(FocalPlane + TurnSpread), 0.001)
+        val half = RestTilt + (PassTilt - RestTilt) / 2
+        assertEquals(half, flankTilt(FocalPlane + TurnSpread / 2), 0.001)
+    }
+
+    /** Flat before it is gone, rather than vanishing mid-swing. */
+    @Test
+    fun `a photograph is already flat by the time it is culled`() {
+        assertEquals(PassTilt, flankTilt(NearCull), 0.001)
+        assertTrue("with room to spare", FocalPlane + TurnSpread < NearCull)
     }
 
     /**
-     * The one the walk buries is the one it must not: with a fixed angle the three
-     * photographs between the walker and the plane are nearer, larger and drawn on
-     * top. Turned away they are slivers — so anything in front of the pick is further
-     * into the stack than the pick is.
+     * The one the walk buries is the one it must not. With a fixed angle and offset the
+     * photographs between the walker and the plane are nearer, so larger, and drawn on
+     * top. Stepping in makes the pick the one closest to the spine, and everything in
+     * front of it is both further out and further round.
      */
     @Test
-    fun `everything between you and the pick is further into the stack`() {
-        val pick = flankTilt(FocalPlane)
-        var previous = pick
-        // Walking out from the plane toward the near cull, one gap at a time.
+    fun `nothing in front of the pick stands closer in or straighter`() {
+        val pickOffset = flankOffset(FocalPlane)
+        val pickTilt = flankTilt(FocalPlane)
         var n = FocalPlane + MinGap
         while (n <= NearCull) {
-            val turn = flankTilt(n)
-            assertTrue("nearer than the pick, so further round", turn > pick)
-            assertTrue("and never turning back", turn >= previous)
-            previous = turn
+            assertTrue("further out than the pick", flankOffset(n) > pickOffset)
+            assertTrue("and further round", flankTilt(n) > pickTilt)
             n += MinGap
         }
     }
