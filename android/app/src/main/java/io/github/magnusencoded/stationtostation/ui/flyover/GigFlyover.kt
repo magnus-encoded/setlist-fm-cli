@@ -500,9 +500,9 @@ private fun BoxScope.Markers(night: FlyoverNight, travel: Travel, frame: IntSize
  *
  * The scene's projection is done by hand and applied as a plain scale and translation.
  * The only thing left to `graphicsLayer`'s own camera is [flankTilt]'s turn. At
- * [RestTilt] the keystone is about three percent and the framework's default camera is
- * indistinguishable from the scene's. On the way past it reaches [PassTilt], where it
- * is not: a card that far round keystones hard under whatever `cameraDistance`
+ * [RestTilt] there is no turn at all, so nothing is left to it and the two cameras
+ * cannot disagree. On the way past it reaches [PassTilt], where they do: a card that
+ * far round keystones hard under whatever `cameraDistance`
  * defaults to. That is wanted rather than tolerated — a panel going by does recede —
  * but it does mean the two cameras disagree visibly at exactly the moment a photograph
  * is leaving, and if the departure ever looks wrong it is this and not the arithmetic.

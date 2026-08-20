@@ -87,9 +87,12 @@ const val FocalPlane = 300.0
  * everything past it has turned edge-on and covers nothing.
  */
 
-/** In the rank. Not zero — dead-on would flatten the corridor into a strip of
- *  postcards, and the small turn is what says the wall has depth. */
-const val RestTilt = 22.0
+/** In the rank: dead-on. Every photograph the walk has not reached yet stands square
+ *  to the walker, and because they share [FlankX] the nearer ones project further out —
+ *  so the rank reads as a picket of overlapping left edges receding to the vanishing
+ *  point. That cascade is the depth cue, and it is also what the step breaks: the one
+ *  photograph out of line is the one that can be seen whole. */
+const val RestTilt = 0.0
 
 /** Parallel to the walk. Not a clean 90°, which collapses the card to a line and
  *  gives the rasteriser nothing to hold on to; a hairline is the point of leaving it
@@ -106,9 +109,11 @@ const val SlideIn = 60.0
 const val SlideSpread = 400.0
 
 /** The depth the turn takes, starting at the **Focal plane**, and the depth the step
- *  unwinds over. Finishes well inside [NearCull], so a photograph is already flat
- *  before it is gone rather than vanishing mid-swing. */
-const val TurnSpread = 300.0
+ *  unwinds over. One gap on a packed flank, which is the point: exactly one photograph
+ *  is ever mid-turn, and the one after it is already a hairline. Wider, and the two or
+ *  three cards between the walker and the pick are large, half-turned and solid — they
+ *  bury the very thing the step exists to expose. */
+const val TurnSpread = MinGap
 
 /**
  * How far out of the rank something at [net] has stepped: 0 at the wall, 1 fully into

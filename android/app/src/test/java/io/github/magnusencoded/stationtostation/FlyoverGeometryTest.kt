@@ -339,6 +339,28 @@ class FlyoverGeometryTest {
         assertEquals(RestTilt, flankTilt(-FarCull), 0.001)
     }
 
+    /**
+     * **The rank stands square to the walker.** Nothing is skewed until it has been
+     * passed, so the whole approach is a picket of face-on photographs receding, and
+     * the only thing out of line is the one a tap would take.
+     */
+    @Test
+    fun `nothing in the rank is turned at all`() {
+        assertEquals(0.0, RestTilt, 0.001)
+    }
+
+    /**
+     * **Exactly one photograph is ever mid-turn.** The card between the walker and the
+     * pick is the one that can bury it — it is nearer, so larger, and drawn on top —
+     * and a turn spread over two gaps leaves two of them large, half-round and solid
+     * in front of the very thing the step exists to expose.
+     */
+    @Test
+    fun `only one photograph is caught mid-turn`() {
+        assertTrue("no wider than the tightest packing", TurnSpread <= MinGap)
+        assertEquals("so the next one along is already flat", PassTilt, flankTilt(FocalPlane + MinGap), 0.001)
+    }
+
     /** Past the plane it turns parallel to the walk and goes by as a panel. */
     @Test
     fun `the turn is the departure`() {
