@@ -237,7 +237,7 @@ internal fun Flyover(
     LaunchedEffect(night, bucket) {
         val at = travel.value.toDouble()
         val wanted = night.photos
-            .filter { net(it.z, at) in -PrefetchAhead..NearCull }
+            .filter { net(it.z, at) in -PrefetchAhead..TurnEnd }
             .sortedBy { abs(net(it.z, at) - FocalPlane) }
             .take(HeldThumbs)
         // Held bitmaps are bounded by count rather than by bytes: the grid tier is a
@@ -536,7 +536,7 @@ private fun FlankPhoto(
             .size(w.toFloat().dp, h.toFloat().dp)
             .graphicsLayer {
                 val n = net(photo.z, travel.value.toDouble())
-                val a = opacity(n)
+                val a = flankOpacity(n)
                 alpha = a
                 if (a <= 0f) return@graphicsLayer
                 val s = projectedScale(n).toFloat()

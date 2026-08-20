@@ -8,8 +8,11 @@ import io.github.magnusencoded.stationtostation.ui.flyover.PassTilt
 import io.github.magnusencoded.stationtostation.ui.flyover.RestTilt
 import io.github.magnusencoded.stationtostation.ui.flyover.SlideIn
 import io.github.magnusencoded.stationtostation.ui.flyover.SlideSpread
+import io.github.magnusencoded.stationtostation.ui.flyover.TurnEnd
 import io.github.magnusencoded.stationtostation.ui.flyover.TurnSpread
 import io.github.magnusencoded.stationtostation.ui.flyover.flankOffset
+import io.github.magnusencoded.stationtostation.ui.flyover.flankOpacity
+import io.github.magnusencoded.stationtostation.ui.flyover.flankVisible
 import io.github.magnusencoded.stationtostation.ui.flyover.flankStep
 import io.github.magnusencoded.stationtostation.ui.flyover.flankTilt
 import io.github.magnusencoded.stationtostation.ui.flyover.FocalLength
@@ -369,11 +372,37 @@ class FlyoverGeometryTest {
         assertEquals(half, flankTilt(FocalPlane + TurnSpread / 2), 0.001)
     }
 
-    /** Flat before it is gone, rather than vanishing mid-swing. */
+    /**
+     * **Parallel is the exit.** A photograph is gone the instant it reaches [PassTilt],
+     * because carrying on past it is a card turning inside out — showing its back edge
+     * and reading as swinging through the walker.
+     */
     @Test
-    fun `a photograph is already flat by the time it is culled`() {
-        assertEquals(PassTilt, flankTilt(NearCull), 0.001)
-        assertTrue("with room to spare", FocalPlane + TurnSpread < NearCull)
+    fun `a photograph is gone the moment it turns parallel`() {
+        assertEquals(PassTilt, flankTilt(TurnEnd), 0.001)
+        assertEquals(0f, flankOpacity(TurnEnd), 0.001f)
+        assertTrue(!flankVisible(TurnEnd + 1))
+    }
+
+    /** And solid up to the plane, so the fade is the departure and not a haze over the
+     *  whole walk. */
+    @Test
+    fun `a photograph is solid until it has been passed`() {
+        assertEquals(opacity(FocalPlane), flankOpacity(FocalPlane), 0.001f)
+        assertTrue("still worth looking at halfway round", flankOpacity(FocalPlane + TurnSpread / 2) > 0.5f)
+    }
+
+    /**
+     * A tap must never open a photograph that is not on screen, and the flank's window
+     * closes long before the shared one does.
+     */
+    @Test
+    fun `the pick cannot be something that has already gone`() {
+        val past = PlacedItem("past", mine = true, z = 0.0)
+        val ahead = PlacedItem("ahead", mine = true, z = 1000.0)
+        // Travel that puts `past` beyond the turn and `ahead` still approaching.
+        val at = TurnEnd + MinGap
+        assertEquals("ahead", focalPick(listOf(past, ahead), at, mine = true))
     }
 
     /**
@@ -387,7 +416,7 @@ class FlyoverGeometryTest {
         val pickOffset = flankOffset(FocalPlane)
         val pickTilt = flankTilt(FocalPlane)
         var n = FocalPlane + MinGap
-        while (n <= NearCull) {
+        while (n <= TurnEnd) {
             assertTrue("further out than the pick", flankOffset(n) > pickOffset)
             assertTrue("and further round", flankTilt(n) > pickTilt)
             n += MinGap

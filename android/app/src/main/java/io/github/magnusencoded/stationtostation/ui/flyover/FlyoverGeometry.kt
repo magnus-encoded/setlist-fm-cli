@@ -116,6 +116,36 @@ const val SlideSpread = 400.0
 const val TurnSpread = MinGap
 
 /**
+ * Where a photograph leaves: the instant the turn completes.
+ *
+ * **Parallel is the exit.** Carrying on past [PassTilt] is a card turning inside out —
+ * it starts showing its back edge and reads as swinging *through* the walker, which is
+ * the one thing a rack of records never does. It is also where the projection gets
+ * silly: at the shared [NearCull] a photograph is thirteen times its authored size and
+ * covers the screen, and every one of those frames was a solid quad the walk had
+ * already finished with.
+ *
+ * Photographs alone leave here. The floor and the spine keep the shared window, because
+ * the road does run under you.
+ */
+const val TurnEnd = FocalPlane + TurnSpread
+
+/** In view, for something on a flank. */
+fun flankVisible(net: Double): Boolean = net <= TurnEnd && net >= -FarCull
+
+/**
+ * A photograph's alpha: the shared [opacity] while it approaches, then out over the
+ * turn. Squared, so it holds while there is still something to look at and goes in the
+ * last of the swing, where it is a hairline anyway — a hard cut at [TurnEnd] leaves a
+ * lit outline snapping off mid-air.
+ */
+fun flankOpacity(net: Double): Float {
+    if (!flankVisible(net)) return 0f
+    val past = ((net - FocalPlane) / TurnSpread).coerceIn(0.0, 1.0)
+    return opacity(net) * (1.0 - past * past).toFloat()
+}
+
+/**
  * How far out of the rank something at [net] has stepped: 0 at the wall, 1 fully into
  * the aisle. Rises across [SlideSpread] on the way in, falls across [TurnSpread] on the
  * way out — so the photograph goes back where it came from as it turns.
@@ -411,7 +441,7 @@ fun focalPick(placed: List<PlacedItem>, travel: Double, mine: Boolean): String? 
     placed.asSequence()
         .filter { it.mine == mine }
         .map { it to net(it.z, travel) }
-        .filter { (_, n) -> visible(n) }
+        .filter { (_, n) -> flankVisible(n) }
         .minByOrNull { (_, n) -> kotlin.math.abs(n - FocalPlane) }
         ?.first?.id
 
