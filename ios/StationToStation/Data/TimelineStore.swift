@@ -593,8 +593,16 @@ actor TimelineStore {
     /// computed against a cache read before it started would discard everything this
     /// device wrote meanwhile — a Contact reconcile landing, a note typed. Running it here
     /// means the cache it merges into is the cache being written.
-    func applyHandover(_ plan: (TimelineCache) -> HandoverPlan) {
-        writeMerged { plan($0).merged }
+    /// Returns the plan it actually wrote, so the caller can cut thumbnails for exactly
+    /// what landed (#98) without recomputing it against a cache that has since moved.
+    @discardableResult
+    func applyHandover(_ plan: (TimelineCache) -> HandoverPlan) -> HandoverPlan {
+        var written = HandoverPlan()
+        writeMerged { cache in
+            written = plan(cache)
+            return written.merged
+        }
+        return written
     }
 
     /// Where each song starts inside one recording, replacing what was there.

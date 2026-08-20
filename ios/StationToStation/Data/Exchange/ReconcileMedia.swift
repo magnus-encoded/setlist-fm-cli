@@ -192,8 +192,23 @@ extension PhotoLibrary {
 /// size for free; PhotoKit has no supported way to ask for one without reading the file,
 /// and nothing reads this field — the real length rides each item's own header, where a
 /// receiver actually needs it.
+/// The same hashing over the manifest a **device handover** offers (#142).
+///
+/// Two functions rather than one with a flag, because the manifests they hash are two
+/// different disclosures — `contactManifest` narrows to the shared band and rewrites
+/// attribution, `deviceManifest` applies the source's tick list and leaves attribution
+/// alone — and the hashing is the only part they share.
+func hashedDeviceManifest(_ cache: TimelineCache, allow: Set<String>,
+                          identities: Identities) async -> HandoverManifest {
+    await hashing(deviceManifest(cache, allow: allow, identities: identities), cache)
+}
+
 func hashedContactManifest(_ cache: TimelineCache, me: String) async -> HandoverManifest {
-    var manifest = contactManifest(cache, me: me)
+    await hashing(contactManifest(cache, me: me), cache)
+}
+
+private func hashing(_ offered: HandoverManifest, _ cache: TimelineCache) async -> HandoverManifest {
+    var manifest = offered
     var refById: [String: String] = [:]
     for items in cache.gigMedia.values {
         for item in items { refById[item.id] = item.ref }
