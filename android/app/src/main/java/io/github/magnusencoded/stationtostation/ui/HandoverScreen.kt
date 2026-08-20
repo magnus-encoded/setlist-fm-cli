@@ -150,13 +150,14 @@ private val choices = listOf(
 )
 
 /**
- * The source's approval. Everything but accounts starts ticked — records are copied and
- * nothing is removed, so the cautious default costs nothing, while a credential leaving
- * this phone is the one thing that should never happen by not reading the screen.
+ * The source's approval. **Nothing starts ticked**, so every category that leaves this
+ * phone was chosen rather than merely not un-chosen — and the button stays dead until at
+ * least one is, which makes tapping through without reading the screen impossible rather
+ * than merely unwise. The row that goes unread is the row that does not travel.
  */
 @Composable
 private fun WhatGoes(onOffer: (Set<String>) -> Unit) {
-    var allow by remember { mutableStateOf(choices.dropLast(1).flatMap { it.categories }.toSet()) }
+    var allow by remember { mutableStateOf(emptySet<String>()) }
 
     Spacer(Modifier.height(12.dp))
     Text(

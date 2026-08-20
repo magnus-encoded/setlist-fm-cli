@@ -28,14 +28,17 @@ struct HandoverView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var nav: Nav
 
+    /// **Nothing starts ticked**, matching Android: every category that leaves this phone
+    /// was chosen rather than merely not un-chosen, and the button stays disabled until at
+    /// least one is. The row that goes unread is the row that does not travel.
     @State private var choices: [Choice] = [
         Choice(id: "nights", title: "Nights",
                detail: "Every gig, its setlist, your log, your check-ins and playlists.",
-               categories: [categorySetlists], ticked: true),
+               categories: [categorySetlists], ticked: false),
         Choice(id: "media", title: "Photos, videos and notes",
                detail: "Everything attached to a night that is not in the vault.",
                categories: [StoredMedia.Kind.photo, StoredMedia.Kind.video, StoredMedia.Kind.note],
-               ticked: true),
+               ticked: false),
         Choice(id: "vault", title: "The vault",
                detail: "What you marked personal. It stays personal on the new phone.",
                categories: [categoryOf(kind: StoredMedia.Kind.photo, personal: true),
