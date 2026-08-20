@@ -18,6 +18,9 @@ import io.github.magnusencoded.stationtostation.ui.flyover.flankStep
 import io.github.magnusencoded.stationtostation.ui.flyover.flankTilt
 import io.github.magnusencoded.stationtostation.ui.flyover.FocalLength
 import io.github.magnusencoded.stationtostation.ui.flyover.FocalPlane
+import io.github.magnusencoded.stationtostation.ui.flyover.HoldFrom
+import io.github.magnusencoded.stationtostation.ui.flyover.HoldSpread
+import io.github.magnusencoded.stationtostation.ui.flyover.HoldTo
 import io.github.magnusencoded.stationtostation.ui.flyover.MinGap
 import io.github.magnusencoded.stationtostation.ui.flyover.NearCull
 import io.github.magnusencoded.stationtostation.ui.flyover.PlacedItem
@@ -297,7 +300,7 @@ class FlyoverGeometryTest {
         assertEquals("m", focalPick(placed, at, mine = true))
     }
 
-    // --- The step and the turn ----------------------------------------------
+    // --- The step, the hold and the turn -------------------------------------
 
     /** Fully out of the rank exactly where a tap would take it. The step *is* the
      *  affordance: nearest the spine means yours. */
@@ -307,47 +310,98 @@ class FlyoverGeometryTest {
         assertEquals(FlankX - SlideIn, flankOffset(FocalPlane), 0.001)
     }
 
-    /** Out at the wall while it is still someone else's turn, at either end. */
+    /** Out at the wall while it is still another photograph's turn, at either end. */
     @Test
     fun `a photograph the walk has not reached stands at the wall`() {
-        assertEquals(0.0, flankStep(FocalPlane - SlideSpread), 0.001)
-        assertEquals(FlankX, flankOffset(FocalPlane - SlideSpread), 0.001)
-        assertEquals("and back at it once past", 0.0, flankStep(FocalPlane + TurnSpread), 0.001)
-        assertEquals(FlankX, flankOffset(FocalPlane + TurnSpread), 0.001)
+        assertEquals(0.0, flankStep(HoldFrom - SlideSpread), 0.001)
+        assertEquals(FlankX, flankOffset(HoldFrom - SlideSpread), 0.001)
+        assertEquals("and back at it once past", 0.0, flankStep(TurnEnd), 0.001)
+        assertEquals(FlankX, flankOffset(TurnEnd), 0.001)
+    }
+
+    /**
+     * **The runway.** A photograph stands fully in the aisle for a whole gap rather
+     * than touching it for one value of travel and unwinding — there has to be
+     * somewhere for the eye to rest and something to aim a thumb at.
+     */
+    @Test
+    fun `the one in the aisle stays there for a stretch of the walk`() {
+        var n = HoldFrom
+        while (n <= HoldTo) {
+            assertEquals("fully in across the hold", 1.0, flankStep(n), 0.001)
+            n += HoldSpread / 8
+        }
+        assertTrue("and it is a real stretch of night", HoldSpread >= MinGap)
+    }
+
+    /**
+     * **The hold is the pick.** [focalPick] takes whatever is nearest the plane, so on
+     * an evenly packed flank the pick changes exactly halfway between two photographs —
+     * which is where the hold ends. Fully stepped in and "the one a tap takes" are
+     * therefore the same stretch of walk, and the two hand over together.
+     */
+    @Test
+    fun `the hold begins and ends where the pick changes hands`() {
+        val both = listOf(
+            PlacedItem("here", mine = true, z = 0.0),
+            PlacedItem("next", mine = true, z = MinGap),
+        )
+        assertEquals("here", focalPick(both, FocalPlane + HoldSpread / 2 - 1, mine = true))
+        assertEquals("next", focalPick(both, FocalPlane + HoldSpread / 2 + 1, mine = true))
+    }
+
+    /**
+     * Both ramps ease toward the hold: it decelerates to a stop coming in, and creeps
+     * before it goes. A linear ramp gives the card its greatest speed at exactly the
+     * moment it arrives, which is the one moment it should be still.
+     */
+    @Test
+    fun `the step slows into the aisle and creeps out of it`() {
+        val lastIn = flankStep(HoldFrom) - flankStep(HoldFrom - SlideSpread / 8)
+        val firstIn = flankStep(HoldFrom - SlideSpread * 7 / 8) - flankStep(HoldFrom - SlideSpread)
+        assertTrue("slowest as it arrives", lastIn < firstIn)
+
+        val firstOut = flankStep(HoldTo) - flankStep(HoldTo + TurnSpread / 8)
+        val lastOut = flankStep(TurnEnd - TurnSpread / 8) - flankStep(TurnEnd)
+        assertTrue("slowest as it leaves", firstOut < lastOut)
     }
 
     /**
      * **The step has to happen on the screen, not just in the arithmetic.**
      *
-     * A photograph on its way to the plane is swelling under [projectedScale], and the
-     * swelling carries it outward from the vanishing point. The first cut of this
-     * subtracted an inward step that the swelling cancelled to the last decimal: the
-     * card tracked a dead-straight line up the screen and nothing appeared to move.
-     * The only assertion that catches that is one on the far side of the projection.
+     * A photograph on its way in is swelling under [projectedScale], and the swelling
+     * carries it outward from the vanishing point. The first cut of this subtracted an
+     * inward step that the swelling cancelled to the last decimal: the card tracked a
+     * dead-straight line up the screen and nothing appeared to move. The only assertion
+     * that catches that is one on the far side of the projection.
      */
     @Test
     fun `the step is inward on the screen and not only in the units`() {
         var previous = Double.MAX_VALUE
-        var n = FocalPlane - SlideSpread
-        while (n <= FocalPlane) {
+        var n = HoldFrom - SlideSpread
+        while (n <= HoldFrom) {
             val x = flankScreenX(n)
             assertTrue("always inward on the way in", x < previous)
             previous = x
-            n += SlideSpread / 8
+            n += SlideSpread / 16
         }
-        val start = flankScreenX(FocalPlane - SlideSpread)
+        val start = flankScreenX(HoldFrom - SlideSpread)
         assertTrue(
             "and by a good part of where it started, not a nudge",
-            flankScreenX(FocalPlane) < start * 0.75,
+            flankScreenX(HoldFrom) < start * 0.75,
         )
     }
 
-    /** One gap, like the turn: the rank is a picket and exactly one photograph is ever
-     *  out of line. */
+    /** One gap, so at most one photograph is ever on its way in. */
     @Test
-    fun `only one photograph is ever out of the rank`() {
+    fun `only one photograph is ever on its way into the aisle`() {
         assertTrue("no wider than the tightest packing", SlideSpread <= MinGap)
-        assertEquals("so the one behind it is still at the wall", 0.0, flankStep(FocalPlane - MinGap), 0.001)
+        assertEquals(
+            "so the one a gap behind it is still at the wall",
+            0.0,
+            flankStep(HoldFrom - SlideSpread - 1),
+            0.001,
+        )
     }
 
     /** Stepping the whole way would put the two flanks in each other's way: at the plane
@@ -358,13 +412,14 @@ class FlyoverGeometryTest {
     }
 
     /**
-     * **Slide first, turn after.** All the way in it is at rest — turning on approach
-     * as well would make the two halves of the movement say the same thing twice.
+     * **Slide first, turn after.** Nothing turns until it has stopped being the one a
+     * tap takes — turning on approach as well would make the two halves of the movement
+     * say the same thing twice.
      */
     @Test
-    fun `nothing turns before the plane`() {
+    fun `nothing turns before the hold is over`() {
+        assertEquals(RestTilt, flankTilt(HoldTo), 0.001)
         assertEquals(RestTilt, flankTilt(FocalPlane), 0.001)
-        assertEquals(RestTilt, flankTilt(FocalPlane - MinGap), 0.001)
         assertEquals(RestTilt, flankTilt(-FarCull), 0.001)
     }
 
@@ -387,15 +442,15 @@ class FlyoverGeometryTest {
     @Test
     fun `only one photograph is caught mid-turn`() {
         assertTrue("no wider than the tightest packing", TurnSpread <= MinGap)
-        assertEquals("so the next one along is already flat", PassTilt, flankTilt(FocalPlane + MinGap), 0.001)
+        assertEquals("so the next one along is already flat", PassTilt, flankTilt(HoldTo + MinGap), 0.001)
     }
 
-    /** Past the plane it turns parallel to the walk and goes by as a panel. */
+    /** Past the hold it turns parallel to the walk and goes by as a panel. */
     @Test
     fun `the turn is the departure`() {
-        assertEquals(PassTilt, flankTilt(FocalPlane + TurnSpread), 0.001)
+        assertEquals(PassTilt, flankTilt(TurnEnd), 0.001)
         val half = RestTilt + (PassTilt - RestTilt) / 2
-        assertEquals(half, flankTilt(FocalPlane + TurnSpread / 2), 0.001)
+        assertEquals(half, flankTilt(HoldTo + TurnSpread / 2), 0.001)
     }
 
     /**
@@ -405,17 +460,17 @@ class FlyoverGeometryTest {
      */
     @Test
     fun `a photograph is gone the moment it turns parallel`() {
-        assertEquals(PassTilt, flankTilt(TurnEnd), 0.001)
         assertEquals(0f, flankOpacity(TurnEnd), 0.001f)
         assertTrue(!flankVisible(TurnEnd + 1))
     }
 
-    /** And solid up to the plane, so the fade is the departure and not a haze over the
+    /** And solid through the hold, so the fade is the departure and not a haze over the
      *  whole walk. */
     @Test
     fun `a photograph is solid until it has been passed`() {
         assertEquals(opacity(FocalPlane), flankOpacity(FocalPlane), 0.001f)
-        assertTrue("still worth looking at halfway round", flankOpacity(FocalPlane + TurnSpread / 2) > 0.5f)
+        assertEquals(opacity(HoldTo), flankOpacity(HoldTo), 0.001f)
+        assertTrue("still worth looking at halfway round", flankOpacity(HoldTo + TurnSpread / 2) > 0.5f)
     }
 
     /**
@@ -432,16 +487,16 @@ class FlyoverGeometryTest {
     }
 
     /**
-     * The one the walk buries is the one it must not. With a fixed angle and offset the
-     * photographs between the walker and the plane are nearer, so larger, and drawn on
-     * top. Stepping in makes the pick the one closest to the spine, and everything in
-     * front of it is both further out and further round.
+     * The one the walk buries is the one it must not. The photographs between the
+     * walker and the plane are nearer, so larger, and drawn on top. Stepping in makes
+     * the pick the one closest to the spine, and everything in front of it is both
+     * further out and further round.
      */
     @Test
     fun `nothing in front of the pick stands closer in or straighter`() {
         val pickOffset = flankScreenX(FocalPlane)
         val pickTilt = flankTilt(FocalPlane)
-        var n = FocalPlane + MinGap
+        var n = HoldTo + MinGap
         while (n <= TurnEnd) {
             assertTrue("further out than the pick", flankScreenX(n) > pickOffset)
             assertTrue("and further round", flankTilt(n) > pickTilt)

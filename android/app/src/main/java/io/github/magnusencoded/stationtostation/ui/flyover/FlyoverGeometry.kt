@@ -106,16 +106,33 @@ const val PassTilt = 88.0
  *  middle of the aisle. */
 const val SlideIn = FlankX / 2
 
-/** The depth the step takes, finishing at the **Focal plane**. One gap, like the turn:
- *  the rank is a picket and exactly one photograph is ever out of line. Spread over two
- *  or three, several are half out and none of them is *the* one. */
+/** The depth the step takes, finishing at [HoldFrom]. One gap, so at most one
+ *  photograph is ever on its way in. */
 const val SlideSpread = MinGap
 
-/** The depth the turn takes, starting at the **Focal plane**, and the depth the step
- *  unwinds over. One gap on a packed flank, which is the point: exactly one photograph
- *  is ever mid-turn, and the one after it is already a hairline. Wider, and the two or
- *  three cards between the walker and the pick are large, half-turned and solid — they
- *  bury the very thing the step exists to expose. */
+/**
+ * How long a photograph stands fully in the aisle before it leaves — the runway the
+ * step arrives on.
+ *
+ * **One gap, and that is not a taste knob.** [focalPick] takes whatever is nearest the
+ * **Focal plane**, so with photographs packed at [MinGap] the pick changes exactly
+ * halfway between two of them. A hold one gap wide therefore makes *fully stepped in*
+ * and *the one a tap takes* the same stretch of walk, and hands over from one card to
+ * the next at the moment the pick does. Without it the step is a triangle: the card
+ * touches the aisle for a single value of travel and is already unwinding, so there is
+ * nothing to aim at and nowhere for the eye to rest.
+ */
+const val HoldSpread = MinGap
+
+/** The stretch either side of the **Focal plane** where one photograph is the one. */
+const val HoldFrom = FocalPlane - HoldSpread / 2
+const val HoldTo = FocalPlane + HoldSpread / 2
+
+/** The depth the turn takes, starting at [HoldTo], and the depth the step unwinds over.
+ *  One gap on a packed flank, which is the point: exactly one photograph is ever
+ *  mid-turn, and the one after it is already a hairline. Wider, and the two or three
+ *  cards between the walker and the pick are large, half-turned and solid — they bury
+ *  the very thing the step exists to expose. */
 const val TurnSpread = MinGap
 
 /**
@@ -131,7 +148,7 @@ const val TurnSpread = MinGap
  * Photographs alone leave here. The floor and the spine keep the shared window, because
  * the road does run under you.
  */
-const val TurnEnd = FocalPlane + TurnSpread
+const val TurnEnd = HoldTo + TurnSpread
 
 /** In view, for something on a flank. */
 fun flankVisible(net: Double): Boolean = net <= TurnEnd && net >= -FarCull
@@ -144,19 +161,35 @@ fun flankVisible(net: Double): Boolean = net <= TurnEnd && net >= -FarCull
  */
 fun flankOpacity(net: Double): Float {
     if (!flankVisible(net)) return 0f
-    val past = ((net - FocalPlane) / TurnSpread).coerceIn(0.0, 1.0)
+    val past = ((net - HoldTo) / TurnSpread).coerceIn(0.0, 1.0)
     return opacity(net) * (1.0 - past * past).toFloat()
 }
 
 /**
  * How far out of the rank something at [net] has stepped: 0 at the wall, 1 fully into
- * the aisle. Rises across [SlideSpread] on the way in, falls across [TurnSpread] on the
- * way out — so the photograph goes back where it came from as it turns.
+ * the aisle. In three parts — come in over [SlideSpread], stand there for [HoldSpread],
+ * go back to the wall over [TurnSpread] as it turns.
+ *
+ * **Both ramps ease toward the hold**, which is what makes the aisle read as somewhere
+ * a photograph is *attracted to* rather than a value it passes through. Coming in it
+ * decelerates to a stop; leaving, it creeps before it goes. A linear ramp gives the
+ * card its greatest speed at exactly the moment it arrives, which is the one moment it
+ * should be still.
+ *
+ * The easings are deliberately not the same shape. `t(2 - t)` is fast then slow and
+ * `t²` is slow then fast, so the whole movement is one arrival and one departure and
+ * never a symmetrical bounce.
  */
-fun flankStep(net: Double): Double {
-    val arriving = (net - (FocalPlane - SlideSpread)) / SlideSpread
-    val leaving = 1.0 - (net - FocalPlane) / TurnSpread
-    return minOf(arriving.coerceIn(0.0, 1.0), leaving.coerceIn(0.0, 1.0))
+fun flankStep(net: Double): Double = when {
+    net < HoldFrom -> {
+        val t = ((net - (HoldFrom - SlideSpread)) / SlideSpread).coerceIn(0.0, 1.0)
+        t * (2.0 - t)
+    }
+    net <= HoldTo -> 1.0
+    else -> {
+        val t = ((net - HoldTo) / TurnSpread).coerceIn(0.0, 1.0)
+        1.0 - t * t
+    }
 }
 
 /**
@@ -166,7 +199,7 @@ fun flankStep(net: Double): Double {
  * to the plane is swelling under [projectedScale], and swelling carries it outward from
  * the vanishing point; the inward step is subtracted from a number that is being
  * multiplied. Get the ratio wrong and the two cancel *exactly* — with [SlideIn] over
- * [SlideSpread] equal to `FlankX / (FocalLength - slideStart)` the photograph tracks a
+ * [SlideSpread] equal to `FlankX / (FocalLength - rampStart)` the photograph tracks a
  * dead-straight line up the screen while the arithmetic insists it moved sideways.
  * That was the first attempt at this, at 0.15 against 0.15. It is 0.5 against 0.2 now.
  *
@@ -182,11 +215,12 @@ fun flankOffset(net: Double): Double = FlankX - SlideIn * flankStep(net)
 /**
  * The angle for something at [net], in degrees off face-on.
  *
- * Flat at rest all the way in — the turn is the *departure*, and turning on approach
- * as well would make the two halves of the movement say the same thing twice.
+ * Flat all the way in and through the hold — the turn is the *departure*, and turning
+ * on approach as well would make the two halves of the movement say the same thing
+ * twice. It begins where the photograph stops being the one a tap takes.
  */
 fun flankTilt(net: Double): Double {
-    val past = ((net - FocalPlane) / TurnSpread).coerceIn(0.0, 1.0)
+    val past = ((net - HoldTo) / TurnSpread).coerceIn(0.0, 1.0)
     return RestTilt + (PassTilt - RestTilt) * past
 }
 
