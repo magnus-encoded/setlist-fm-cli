@@ -320,7 +320,8 @@ class FlyoverGeometryTest {
     fun `nothing stands in front of a photograph while it steps in`() {
         assertTrue("the whole movement inside one gap", CycleSpread <= MinGap)
         var n = HoldFrom - SlideSpread
-        while (n <= HoldFrom) {
+        // Up to but not including the hold, where the step is 1 by definition.
+        while (n < HoldFrom) {
             assertTrue("stepping in", flankStep(n) < 1.0)
             assertEquals(
                 "and the one a gap ahead is already gone",
