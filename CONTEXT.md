@@ -95,6 +95,7 @@ Read-only throughout — nothing here edits, and turning back to portrait is how
 | **Flank** | Which side of the corridor an item stands on. Left is **Mine**, right is everyone else's. Side means whose camera, never when or what. | column, tray |
 | **Focal plane** | The fixed distance ahead where whatever stands there is the thing selected. Nothing is tapped to be chosen — walking *is* choosing, and a tap on a **Flank** opens whatever that flank has at the plane. | cursor, selection, focus (fine informally) |
 | **Floor line** | One line down the corridor floor per **Contact** whose media the night holds, in their **Lane colour**. Somebody who was there and gave nothing has no line. | lane (reserved for the timeline), track |
+| **The turn** | How far a photograph is swung toward the corridor wall. A rack of records: a photograph the walk has not reached stands **in the stack**, near enough edge-on to be a sliver, and is pulled round to face the walker as the **Focal plane** arrives at it. The one facing you is the one a tap takes — which is what lets **Variant F** have no controls at all. | tilt, rotation, flip |
 | **Cover** | What stands at the start of the walk: the night's title, where, and the key to the **Floor lines**. | title card, splash |
 | **Wall** | What stands at the end of it: the **Notes**, mine first. The walk stops short of it rather than passing through. | end card, outro |
 

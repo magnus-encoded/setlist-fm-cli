@@ -68,6 +68,43 @@ const val FocalLength = 900.0
  */
 const val FocalPlane = 300.0
 
+/**
+ * **The turn**: how far a photograph is swung toward the corridor wall, in degrees.
+ *
+ * A rack of records, not a row of pictures. A photograph the walk has not reached
+ * stands *in the stack* — near enough edge-on that it is a bright sliver against the
+ * wall — and is pulled round to face the walker as the **Focal plane** arrives at it.
+ * Past it, it turns back into the stack.
+ *
+ * This is what makes **Variant F** work in a crowded night. With a fixed angle, the
+ * three photographs standing between the walker and the focal plane are nearer, so
+ * larger, and drawn on top: the one a tap would take was systematically buried behind
+ * the ones you were actually looking at. Turned away they are slivers, and cover
+ * nothing. The photograph facing you *is* the photograph you get — no marker over the
+ * scene saying so, which is the whole point of having no controls.
+ *
+ * [FaceOnTilt] is not zero: dead-on would flatten the corridor into a strip of
+ * postcards, and the small turn is what says the wall has depth.
+ */
+const val FaceOnTilt = 22.0
+const val StackTilt = 78.0
+
+/**
+ * How much depth the turn takes. At [MinGap] — a packed flank's spacing — a
+ * photograph's immediate neighbour is already halfway into the stack, which is the
+ * separation the eye needs to tell one card from the next.
+ */
+const val TurnSpread = 300.0
+
+/**
+ * The turn for something at [net], in degrees from face-on. Symmetric: approaching and
+ * departing look the same, because the walk reads the same in both directions.
+ */
+fun flankTilt(net: Double): Double {
+    val away = kotlin.math.abs(net - FocalPlane) / TurnSpread
+    return FaceOnTilt + (StackTilt - FaceOnTilt) * away.coerceIn(0.0, 1.0)
+}
+
 /** Where a passed item begins to go, and where it is gone. Softens the last moment
  *  so nothing pops; you pass *through* it rather than seeing it vanish. */
 const val NearFadeFrom = 480.0

@@ -499,10 +499,16 @@ private fun BoxScope.Markers(night: FlyoverNight, travel: Travel, frame: IntSize
  * One photograph, on its flank.
  *
  * The scene's projection is done by hand and applied as a plain scale and translation.
- * The only thing left to `graphicsLayer`'s own camera is the 26° turn toward you, which
- * at these distances is a three-percent keystone — small enough that the framework's
- * default camera is indistinguishable from the scene's, and small enough that setting
- * one would be inviting the per-layer camera to disagree with the scene for nothing.
+ * The only thing left to `graphicsLayer`'s own camera is [flankTilt]'s turn.
+ *
+ * That used to be a fixed 26°, where the keystone is about three percent and the
+ * framework's default camera was indistinguishable from the scene's. The turn now
+ * reaches [StackTilt], where it is not: a card that far round keystones hard under
+ * whatever `cameraDistance` defaults to. That is wanted rather than tolerated — a
+ * record in a rack does recede — but it does mean the two cameras now disagree
+ * visibly, and if the stack ever looks wrong it is this and not the arithmetic. The
+ * fix would be to set `cameraDistance` from [FocalLength]; it is left alone until
+ * something on a screen says it needs setting.
  */
 @Composable
 private fun FlankPhoto(
@@ -539,9 +545,12 @@ private fun FlankPhoto(
                 scaleY = s
                 translationX = (if (photo.mine) -FlankX else FlankX).toFloat() * density * s
                 translationY = frame.height * VanishY - frame.height / 2f
-                // Turned toward you: the outer edge comes forward, the inner edge falls
-                // away. Mirrored across the spine, so both flanks face the walker.
-                rotationY = if (photo.mine) Tilt else -Tilt
+                // The turn: flat in the stack until the walk reaches it, round to face
+                // the walker at the focal plane, back into the stack as you pass.
+                // Mirrored across the spine, so both flanks turn toward you and not
+                // through each other.
+                val turn = flankTilt(n).toFloat()
+                rotationY = if (photo.mine) turn else -turn
             }
             .clip(RoundedCornerShape(6.dp))
             .background(Raised)
@@ -844,7 +853,6 @@ private val Amber = Color(0xFFE7B24C)
 private const val VanishY = 0.46f
 
 /** Degrees each photograph turns toward the walker. */
-private const val Tilt = 26f
 
 /** A photograph's longest edge, in flyover units. */
 private const val PhotoLongEdge = 148.0
