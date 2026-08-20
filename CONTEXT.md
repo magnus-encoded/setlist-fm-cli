@@ -81,6 +81,23 @@ apart on purpose.
 | **Curtain** | What pulling down does: draw it back and see what the **Window** says about this night *now*. A returned instruction, not a call site's choice, and it may be a curtain onto an empty view. Failing changes nothing. | refresh (fine informally), sync, reload |
 | **Window** | The data source behind a **Curtain** — setlist.fm or MusicBrainz. Which window a **Room** has depends on what is already known about the night. | api, endpoint, feed |
 
+## The flyover
+
+Landscape on a **Gig** is not a re-layout of the **Room**: it is a different thing to do
+with the same night. Turn the phone and you stand at the start of it and walk down it.
+Read-only throughout — nothing here edits, and turning back to portrait is how you act.
+
+| Term | Definition | Aliases to avoid |
+| ---- | ---------- | ---------------- |
+| **Flyover** | The landscape face of a **Gig**: the night as a corridor you travel down, media standing along it in the order it was captured. **Vertical is time** still holds — the corridor *is* the time axis, laid into the screen. | 3D view, gallery, carousel, slideshow |
+| **Walk** | Travel along the **Flyover**, dragging up to go later. The only navigation it has; there is no scrubber and no controls. | scroll, seek, playback |
+| **Spine** | Unchanged — the night's songs, as evenly spaced markers along the corridor floor. Photographs sit deliberately off the gridlines: no photograph-to-song mapping exists to be drawn. | timeline, ruler |
+| **Flank** | Which side of the corridor an item stands on. Left is **Mine**, right is everyone else's. Side means whose camera, never when or what. | column, tray |
+| **Focal plane** | The fixed distance ahead where whatever stands there is the thing selected. Nothing is tapped to be chosen — walking *is* choosing, and a tap on a **Flank** opens whatever that flank has at the plane. | cursor, selection, focus (fine informally) |
+| **Floor line** | One line down the corridor floor per **Contact** whose media the night holds, in their **Lane colour**. Somebody who was there and gave nothing has no line. | lane (reserved for the timeline), track |
+| **Cover** | What stands at the start of the walk: the night's title, where, and the key to the **Floor lines**. | title card, splash |
+| **Wall** | What stands at the end of it: the **Notes**, mine first. The walk stops short of it rather than passing through. | end card, outro |
+
 ## Ownership and sharing
 
 | Term | Definition | Aliases to avoid |
