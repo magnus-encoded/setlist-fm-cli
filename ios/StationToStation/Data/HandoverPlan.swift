@@ -15,7 +15,10 @@ import Foundation
 /// every rule below is assertable on a laptop.
 
 /// What should happen. Data, not effects.
-struct HandoverPlan: Equatable {
+/// Not `Equatable`, unlike `ContactReconcilePlan`: `merged` is a whole `TimelineCache`,
+/// which is not — and a plan is compared field by field anyway, because "the same union"
+/// is not a question anything asks.
+struct HandoverPlan {
     /// My timeline unioned with theirs, with everything already resolvable attached.
     /// Items still in `request` are deliberately *not* in it: their bytes have not
     /// arrived, and a **Media** record pointing at nothing is the dead reference #97
