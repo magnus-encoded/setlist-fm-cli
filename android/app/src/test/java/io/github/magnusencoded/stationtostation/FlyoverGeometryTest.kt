@@ -273,7 +273,12 @@ class FlyoverGeometryTest {
     /** Which flank is the one bit travel cannot resolve, so the flanks never mix. */
     @Test
     fun `one flank never picks the other's photograph`() {
-        val placed = placeMedia(listOf(mine("m", 0L), theirs("t", 1L)), songCount = 12)
+        val placed = placeMedia(
+            listOf(mine("m", 0L), theirs("t", 1L), mine("later", 100L)),
+            songCount = 12,
+        )
+        // Standing where theirs is exactly at the plane: the other flank still answers
+        // with its own nearest, and not with the one under the thumb.
         val at = zOf(placed, "t") + FocalPlane
         assertEquals("t", focalPick(placed, at, mine = false))
         assertEquals("m", focalPick(placed, at, mine = true))
