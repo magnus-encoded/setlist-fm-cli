@@ -99,14 +99,17 @@ const val RestTilt = 0.0
  *  short. */
 const val PassTilt = 88.0
 
-/** How far in off [FlankX] a photograph steps to be the one. Not the whole way: both
- *  flanks step in, and they must not meet in the middle of the aisle. */
-const val SlideIn = 60.0
+/** How far in off [FlankX] a photograph steps to be the one. Half the flank, which is
+ *  the geometric limit rather than a taste: a photograph at the **Focal plane** draws at
+ *  one and a half times its authored size, so a landscape card standing at `FlankX / 2`
+ *  has its inner edge exactly on the spine. Further, and the two flanks meet in the
+ *  middle of the aisle. */
+const val SlideIn = FlankX / 2
 
-/** The depth the step takes, finishing at the **Focal plane**. Wide enough — some two
- *  and a half gaps on a packed flank — that the step reads as an approach and not as a
- *  card snapping sideways. */
-const val SlideSpread = 400.0
+/** The depth the step takes, finishing at the **Focal plane**. One gap, like the turn:
+ *  the rank is a picket and exactly one photograph is ever out of line. Spread over two
+ *  or three, several are half out and none of them is *the* one. */
+const val SlideSpread = MinGap
 
 /** The depth the turn takes, starting at the **Focal plane**, and the depth the step
  *  unwinds over. One gap on a packed flank, which is the point: exactly one photograph
@@ -155,6 +158,23 @@ fun flankStep(net: Double): Double {
     val leaving = 1.0 - (net - FocalPlane) / TurnSpread
     return minOf(arriving.coerceIn(0.0, 1.0), leaving.coerceIn(0.0, 1.0))
 }
+
+/**
+ * Where a photograph on a flank actually draws: units from the spine, at screen scale.
+ *
+ * **The step has to outrun the perspective, or it does not happen.** A card on its way
+ * to the plane is swelling under [projectedScale], and swelling carries it outward from
+ * the vanishing point; the inward step is subtracted from a number that is being
+ * multiplied. Get the ratio wrong and the two cancel *exactly* — with [SlideIn] over
+ * [SlideSpread] equal to `FlankX / (FocalLength - slideStart)` the photograph tracks a
+ * dead-straight line up the screen while the arithmetic insists it moved sideways.
+ * That was the first attempt at this, at 0.15 against 0.15. It is 0.5 against 0.2 now.
+ *
+ * Which is why this is the function the screen uses and the tests assert on. An inward
+ * step is a claim about what reaches the eye, and only this side of the projection can
+ * make it.
+ */
+fun flankScreenX(net: Double): Double = flankOffset(net) * projectedScale(net)
 
 /** How far off the spine something at [net] stands, in units. */
 fun flankOffset(net: Double): Double = FlankX - SlideIn * flankStep(net)

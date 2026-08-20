@@ -543,9 +543,10 @@ private fun FlankPhoto(
                 scaleX = s
                 scaleY = s
                 // Stepped out of the rank toward the spine as the walk reaches it,
-                // and back to the wall as it goes by.
-                val off = flankOffset(n).toFloat()
-                translationX = (if (photo.mine) -off else off) * density * s
+                // and back to the wall as it goes by. Post-projection: the step is a
+                // claim about the screen, and [flankScreenX] is where it is true.
+                val off = flankScreenX(n).toFloat()
+                translationX = (if (photo.mine) -off else off) * density
                 translationY = frame.height * VanishY - frame.height / 2f
                 // The turn is the departure: at rest all the way in, round to
                 // parallel with the walk on the way past. Mirrored across the spine,

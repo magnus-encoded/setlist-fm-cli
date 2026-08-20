@@ -12,6 +12,7 @@ import io.github.magnusencoded.stationtostation.ui.flyover.TurnEnd
 import io.github.magnusencoded.stationtostation.ui.flyover.TurnSpread
 import io.github.magnusencoded.stationtostation.ui.flyover.flankOffset
 import io.github.magnusencoded.stationtostation.ui.flyover.flankOpacity
+import io.github.magnusencoded.stationtostation.ui.flyover.flankScreenX
 import io.github.magnusencoded.stationtostation.ui.flyover.flankVisible
 import io.github.magnusencoded.stationtostation.ui.flyover.flankStep
 import io.github.magnusencoded.stationtostation.ui.flyover.flankTilt
@@ -315,20 +316,45 @@ class FlyoverGeometryTest {
         assertEquals(FlankX, flankOffset(FocalPlane + TurnSpread), 0.001)
     }
 
-    /** The step reads as an approach, not as a card snapping sideways: it is under way
-     *  a couple of gaps out and never reverses on the way in. */
+    /**
+     * **The step has to happen on the screen, not just in the arithmetic.**
+     *
+     * A photograph on its way to the plane is swelling under [projectedScale], and the
+     * swelling carries it outward from the vanishing point. The first cut of this
+     * subtracted an inward step that the swelling cancelled to the last decimal: the
+     * card tracked a dead-straight line up the screen and nothing appeared to move.
+     * The only assertion that catches that is one on the far side of the projection.
+     */
     @Test
-    fun `the step comes on gradually`() {
-        var previous = -1.0
+    fun `the step is inward on the screen and not only in the units`() {
+        var previous = Double.MAX_VALUE
         var n = FocalPlane - SlideSpread
         while (n <= FocalPlane) {
-            val step = flankStep(n)
-            assertTrue("never backwards on the way in", step >= previous)
-            previous = step
-            n += MinGap / 2
+            val x = flankScreenX(n)
+            assertTrue("always inward on the way in", x < previous)
+            previous = x
+            n += SlideSpread / 8
         }
-        assertTrue("already begun two gaps out", flankStep(FocalPlane - 2 * MinGap) > 0.2)
-        assertTrue("and well under way one gap out", flankStep(FocalPlane - MinGap) > 0.5)
+        val start = flankScreenX(FocalPlane - SlideSpread)
+        assertTrue(
+            "and by a good part of where it started, not a nudge",
+            flankScreenX(FocalPlane) < start * 0.75,
+        )
+    }
+
+    /** One gap, like the turn: the rank is a picket and exactly one photograph is ever
+     *  out of line. */
+    @Test
+    fun `only one photograph is ever out of the rank`() {
+        assertTrue("no wider than the tightest packing", SlideSpread <= MinGap)
+        assertEquals("so the one behind it is still at the wall", 0.0, flankStep(FocalPlane - MinGap), 0.001)
+    }
+
+    /** Stepping the whole way would put the two flanks in each other's way: at the plane
+     *  a landscape card's inner edge lands on the spine and no further. */
+    @Test
+    fun `the step stops where the flanks would meet`() {
+        assertEquals(FlankX / 2, SlideIn, 0.001)
     }
 
     /**
@@ -413,11 +439,11 @@ class FlyoverGeometryTest {
      */
     @Test
     fun `nothing in front of the pick stands closer in or straighter`() {
-        val pickOffset = flankOffset(FocalPlane)
+        val pickOffset = flankScreenX(FocalPlane)
         val pickTilt = flankTilt(FocalPlane)
         var n = FocalPlane + MinGap
         while (n <= TurnEnd) {
-            assertTrue("further out than the pick", flankOffset(n) > pickOffset)
+            assertTrue("further out than the pick", flankScreenX(n) > pickOffset)
             assertTrue("and further round", flankTilt(n) > pickTilt)
             n += MinGap
         }
