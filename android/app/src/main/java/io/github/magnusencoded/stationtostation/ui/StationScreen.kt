@@ -73,6 +73,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -2748,18 +2749,26 @@ private fun MediaTile(
                 Modifier
                     .align(Alignment.TopEnd)
                     .padding(3.dp)
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(Danger)
+                    // The visible chip stays 20dp, but the tap target itself is
+                    // padded out to the 48dp minimum so it's actually reachable.
+                    .minimumInteractiveComponentSize()
                     .clickable { onRemove(item) },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    Icons.Filled.Close,
-                    contentDescription = "Remove",
-                    tint = Color.White,
-                    modifier = Modifier.size(13.dp),
-                )
+                Box(
+                    Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Danger),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Remove",
+                        tint = Color.White,
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
             }
         }
     }
