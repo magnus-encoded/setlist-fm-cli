@@ -114,7 +114,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
@@ -2668,12 +2671,18 @@ private fun VerdictThumbs(current: String?, onVerdict: (String?) -> Unit) {
             StoredMedia.Verdict.UP,
             StoredMedia.Verdict.DOUBLE_UP,
         ).filter { current == null || current == it }.forEach { v ->
+            val selected = current == v
             Text(
                 verdictGlyph(v),
-                color = if (current == v) Amber else Faint,
+                color = if (selected) Amber else Faint,
                 fontSize = 15.sp,
                 modifier = Modifier
-                    .clickable { onVerdict(if (current == v) null else v) }
+                    .clickable { onVerdict(if (selected) null else v) }
+                    .semantics {
+                        contentDescription = verdictLabel(v)
+                        this.selected = selected
+                        role = Role.Button
+                    }
                     .padding(end = 10.dp, top = 2.dp, bottom = 2.dp),
             )
         }
@@ -2685,6 +2694,13 @@ internal fun verdictGlyph(verdict: String?): String = when (verdict) {
     StoredMedia.Verdict.UP -> "👍"
     StoredMedia.Verdict.DOUBLE_UP -> "👍👍"
     else -> ""
+}
+
+private fun verdictLabel(verdict: String?): String = when (verdict) {
+    StoredMedia.Verdict.DOWN -> "Rate down"
+    StoredMedia.Verdict.UP -> "Rate up"
+    StoredMedia.Verdict.DOUBLE_UP -> "Rate up twice"
+    else -> "Rate"
 }
 
 /**
