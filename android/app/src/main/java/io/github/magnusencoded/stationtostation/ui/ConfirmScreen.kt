@@ -78,6 +78,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -265,7 +267,11 @@ private fun ConfirmScreenContent(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Switch(checked = state.playlistPublic, onCheckedChange = viewModel::setPlaylistPublic)
+                Switch(
+                    checked = state.playlistPublic,
+                    onCheckedChange = viewModel::setPlaylistPublic,
+                    modifier = Modifier.semantics { contentDescription = "Public playlist" },
+                )
             }
             Spacer(Modifier.height(8.dp))
             // Without a date there is no window to search the gallery for.
