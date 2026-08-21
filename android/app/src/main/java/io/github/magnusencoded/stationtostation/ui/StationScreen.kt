@@ -1267,7 +1267,8 @@ private fun EmptyTimeline(onAdd: () -> Unit, onPlan: () -> Unit, onAddByHand: ()
                 .clip(CircleShape)
                 .background(AmberSoft)
                 .border(1.5.dp, Amber, CircleShape)
-                .clickable(onClick = onAdd),
+                .clickable(onClick = onAdd)
+                .semantics { contentDescription = "Add your first show" },
             contentAlignment = Alignment.Center,
         ) { Text("+", color = Amber, fontSize = 28.sp) }
         Box(Modifier.width(2.dp).height(30.dp).background(LineCol))
@@ -4030,7 +4031,10 @@ private fun RemoveLogEntry(onRemove: () -> Unit) {
         "×",
         color = Faint,
         fontSize = 20.sp,
-        modifier = Modifier.clickable(onClick = onRemove).padding(horizontal = 10.dp),
+        modifier = Modifier
+            .clickable(onClick = onRemove)
+            .semantics { contentDescription = "Remove" }
+            .padding(horizontal = 10.dp),
     )
 }
 
